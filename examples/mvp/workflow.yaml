@@ -1,0 +1,23 @@
+name: safe-orchestrator-mvp
+description: 以解析规则驱动资产图和条件分支的核心编排流程。
+global_vars:
+  target: 10.1.1.0/24
+nodes:
+  - id: discover
+    tool: service_discovery
+    executor: mock
+    inputs:
+      target: "{{ .vars.target }}"
+    mock:
+      stdout_file: fixtures/discovery.txt
+  - id: enrich_http
+    tool: asset_enrichment
+    executor: mock
+    inputs:
+      http_count: "{{ len .assets.services.http }}"
+    mock:
+      stdout_file: fixtures/enrich.txt
+edges:
+  - from: discover
+    to: enrich_http
+    condition: "len(assets.services.http) > 0 && results.discover.record_count > 0"

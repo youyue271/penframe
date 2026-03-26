@@ -1,0 +1,8 @@
+tool: fscan_scan
+rules:
+  - name: web_title
+    regex: "(?m)^\\[[^\\]]+\\]\\s+网站标题\\s+(?P<url>\\S+)\\s+状态码:(?P<status_code>\\d+)\\s+长度:(?P<length>\\d+)\\s+标题:(?P<title>.+)$"
+    save_to: assets.web.pages
+  - name: vuln_finding
+    regex: "(?m)^\\[(?P<level>VULN)\\]\\s+目标:(?P<target>\\S+)\\s+状态:(?P<status>\\S+)\\s+详情:(?P<detail>.+)$"
+    save_to: assets.security.vulnerabilities

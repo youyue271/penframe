@@ -1,0 +1,26 @@
+# Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go test / coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Local runtime outputs
+output/
+tmp/
+*.log
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local recovery folders
+.git_failed_init_*/

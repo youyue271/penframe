@@ -1,0 +1,70 @@
+tools:
+  chain_start:
+    category: orchestration
+    description: 自动工具链起始节点，用于触发条件分支。
+    command_template: "echo \"chain_start target={{ .inputs.target }}\""
+  service_discovery:
+    category: discovery
+    description: 基于 fixture 的发现节点，用于安全 MVP 演示。
+    command_template: "scanner --target {{ .inputs.target }}"
+    parser: parsers/service_discovery.yaml
+    variables:
+      - name: target
+        required: true
+        description: 需要枚举的 CIDR 或主机列表。
+  asset_enrichment:
+    category: enrichment
+    description: 基于 fixture 的资产增强节点，用于安全 MVP 演示。
+    command_template: "enricher --http-count {{ .inputs.http_count }}"
+    parser: parsers/asset_enrichment.yaml
+
+  nmap_scan:
+    category: discovery
+    description: 从本地工具目录导入的 nmap 扫描模板，可配合 local 执行器在 WSL 中通过 powershell.exe 执行。
+    command_template: "\"/mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe\" {{ .inputs.extra_args }} {{ .inputs.target }}"
+    parser: parsers/nmap_scan.yaml
+    variables:
+      - name: target
+        required: true
+        description: 目标地址、网段或主机清单。
+      - name: extra_args
+        required: false
+        default: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title"
+        description: 额外参数，按需覆盖。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe
+      source: external-tools
+
+  fscan_scan:
+    category: discovery
+    description: 从本地工具目录导入的 fscan 扫描模板，可配合 local 执行器进行 URL/主机扫描。
+    command_template: "\"/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe\" {{ .inputs.target }} {{ .inputs.extra_args }}"
+    parser: parsers/fscan_scan.yaml
+    variables:
+      - name: target
+        required: true
+        description: 目标地址或网段。
+      - name: extra_args
+        required: false
+        default: "-nobr"
+        description: 可选参数串。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe
+      source: external-tools
+
+  nuclei_scan:
+    category: vulnerability
+    description: 基于 nuclei 的 Web 漏洞/CVE 检测模板，可配合 local 执行器在 WSL 中通过 powershell.exe 执行。
+    command_template: "\"/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe\" -u {{ .inputs.target }} {{ .inputs.extra_args }}"
+    parser: parsers/nuclei_scan.yaml
+    variables:
+      - name: target
+        required: true
+        description: 目标 URL 或主机。
+      - name: extra_args
+        required: false
+        default: "-as -severity info,low,medium,high,critical -rate-limit 120 -timeout 10 -retries 2 -duc -ni -sr -nmhe -stats -si 5 -nc"
+        description: nuclei 参数串（不含 -u 与 -o）。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe
+      source: external-tools

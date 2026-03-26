@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Penframe 控制台</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="console">
+      <header class="card topbar">
+        <div class="brand">
+          <p class="brand-kicker">Penframe / Portal</p>
+          <h1>任务控制台</h1>
+          <p class="brand-meta">
+            当前工作流：<strong id="workflowName">加载中...</strong>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <button id="reloadButton" class="btn btn-secondary" type="button">刷新配置</button>
+          <span id="runStatus" class="status-pill">空闲</span>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="页面标签">
+        <button class="tab is-active" data-tab="task" type="button">训练任务</button>
+        <button class="tab" data-tab="runs" type="button">运行历史</button>
+        <button class="tab" data-tab="system" type="button">系统信息</button>
+      </nav>
+
+      <section class="tab-panel is-active" data-panel="task">
+        <section class="card task-launch">
+          <div class="task-input-row">
+            <label class="field">
+              <span>靶机地址</span>
+              <input
+                id="targetInput"
+                type="text"
+                placeholder="例如 https://target.example:3000 或 10.10.10.10"
+              >
+            </label>
+            <button id="startTaskButton" class="btn btn-primary" type="button">开始任务</button>
+          </div>
+          <p id="taskStatus" class="task-status">输入靶机地址后点击开始任务。</p>
+        </section>
+
+        <section class="card">
+          <div class="chain-workbench">
+            <div id="chainBuilderPane" class="chain-builder-pane">
+              <div class="pane-head">
+                <h2>自动工具链（可修改）</h2>
+                <button id="chainCollapseButton" class="btn btn-secondary btn-compact" type="button">收起配置</button>
+              </div>
+              <div id="chainBuilderBody">
+                <div class="chain-presets">
+                  <button class="btn btn-secondary" type="button" data-chain-preset="baseline">基线预置</button>
+                  <button class="btn btn-secondary" type="button" data-chain-preset="full">全量端口预置</button>
+                  <button class="btn btn-secondary" type="button" data-chain-preset="quick-only">仅快速预置</button>
+                </div>
+                <div id="chainEditor" class="stack-list scroll-panel"></div>
+              </div>
+            </div>
+
+            <div class="chain-preview-pane">
+              <h2>即将执行的工具链</h2>
+              <div id="chainPreview" class="stack-list scroll-panel"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>调用工具与执行命令</h2>
+          <div id="toolCalls" class="stack-list scroll-panel"></div>
+        </section>
+
+        <section class="card">
+          <h2>命令原始输出</h2>
+          <div id="rawOutputs" class="stack-list scroll-panel"></div>
+        </section>
+
+        <section class="card">
+          <h2>解析输出（JSON）</h2>
+          <pre id="parsedOutput" class="code-block">{}</pre>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="runs">
+        <div class="split-grid">
+          <section class="card">
+            <h2>运行记录</h2>
+            <div id="runList" class="stack-list scroll-panel"></div>
+          </section>
+
+          <section class="card">
+            <h2>选中任务 JSON</h2>
+            <pre id="selectedRunJson" class="code-block">{}</pre>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="system">
+        <div class="split-grid">
+          <section class="card">
+            <h2>工作流与配置</h2>
+            <pre id="workflowMeta" class="code-block">{}</pre>
+          </section>
+
+          <section class="card">
+            <h2>工具目录</h2>
+            <div id="toolCatalog" class="stack-list scroll-panel"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

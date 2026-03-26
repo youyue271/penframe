@@ -1,0 +1,14 @@
+tool: nmap_scan
+rules:
+  - name: open_tcp_port
+    regex: "(?m)^(?P<port>\\d+/tcp)\\s+open\\s+(?P<service>\\S+)\\s*(?P<version>.*)$"
+    save_to: assets.network.open_ports
+  - name: legacy_tls_version
+    regex: "(?m)^\\|\\s+TLSv(?P<tls_version>1\\.0|1\\.1):"
+    save_to: assets.security.legacy_tls
+  - name: weak_3des_cipher
+    regex: "(?m)^\\|\\s+(?P<cipher>TLS_RSA_WITH_3DES_EDE_CBC_SHA\\s+\\(rsa\\s+\\d+\\)\\s+-\\s+\\w+)$"
+    save_to: assets.security.weak_ciphers
+  - name: missing_hsts
+    regex: "(?m)^\\|_\\s*(?P<finding>HSTS not configured in HTTPS Server)$"
+    save_to: assets.security.http_headers

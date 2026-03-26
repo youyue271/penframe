@@ -1,0 +1,56 @@
+name: live-web-vuln-check
+description: 使用 local 执行器执行真实工具，完成 Web/TLS 基线与漏洞初筛。
+global_vars:
+  target_host: eci-2ze1kr9qyo3mfawg4q3u.cloudeci1.ichunqiu.com
+  target_url: https://eci-2ze1kr9qyo3mfawg4q3u.cloudeci1.ichunqiu.com:3000
+  run_nmap_quick: true
+  run_nmap_full: false
+  run_fscan_web: true
+  run_nuclei_web: true
+  nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title"
+  nmap_full_args: "-Pn -n -sS -p-"
+  fscan_args: "-nobr -np -json -f json -log INFO"
+  nuclei_args: "-as -severity info,low,medium,high,critical -rate-limit 120 -timeout 10 -retries 2 -duc -ni -sr -nmhe -stats -si 5 -nc"
+nodes:
+  - id: start_chain
+    tool: chain_start
+    executor: local
+    inputs:
+      target: "{{ .vars.target_host }}"
+  - id: nmap_quick
+    tool: nmap_scan
+    executor: local
+    inputs:
+      target: "{{ .vars.target_host }}"
+      extra_args: "{{ .vars.nmap_quick_args }} -oN \"{{ .vars.output_dir_windows }}\\nmap-quick.txt\""
+  - id: nmap_full
+    tool: nmap_scan
+    executor: local
+    inputs:
+      target: "{{ .vars.target_host }}"
+      extra_args: "{{ .vars.nmap_full_args }} -oN \"{{ .vars.output_dir_windows }}\\nmap-full.txt\""
+  - id: fscan_web
+    tool: fscan_scan
+    executor: local
+    inputs:
+      target: "-u {{ .vars.target_url }}"
+      extra_args: "{{ .vars.fscan_args }} -o \"{{ .vars.output_dir_windows }}\\fscan-web-live.json\""
+  - id: nuclei_web
+    tool: nuclei_scan
+    executor: local
+    inputs:
+      target: "{{ .vars.target_url }}"
+      extra_args: "{{ .vars.nuclei_args }} -o \"{{ .vars.output_dir_windows }}\\nuclei-web-live.txt\""
+edges:
+  - from: start_chain
+    to: nmap_quick
+    condition: "vars.run_nmap_quick == true"
+  - from: start_chain
+    to: nmap_full
+    condition: "vars.run_nmap_full == true"
+  - from: start_chain
+    to: fscan_web
+    condition: "vars.run_fscan_web == true"
+  - from: start_chain
+    to: nuclei_web
+    condition: "vars.run_nuclei_web == true"
