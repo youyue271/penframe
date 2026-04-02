@@ -141,10 +141,30 @@ func (s *Server) executeScanWorkflow(runID string, req scanRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), resolveRunTimeout(req.TimeoutSeconds))
 	defer cancel()
 
+	runMarkedRunning := false
 	observedCtx := workflow.WithEventObserver(ctx, workflow.EventObserverFunc(func(event workflow.Event) {
 		if event.Summary != nil {
 			s.store.Save(runID, *event.Summary)
 		}
+
+		switch event.Type {
+		case workflow.EventRunStarted, workflow.EventNodeStarted:
+			if !runMarkedRunning {
+				s.assets.UpdatePendingTasksByRun(runID, domain.ScanTaskRunning)
+				runMarkedRunning = true
+			}
+		case workflow.EventRunFinished:
+			if event.Summary != nil && event.Summary.Status == domain.RunStatusSucceeded {
+				s.assets.FinalizeTasksByRun(runID, domain.ScanTaskDone, "")
+			} else {
+				errMsg := "scan workflow failed"
+				if event.Summary != nil && event.Summary.Error != "" {
+					errMsg = event.Summary.Error
+				}
+				s.assets.FinalizeTasksByRun(runID, domain.ScanTaskFailed, errMsg)
+			}
+		}
+
 		s.events.Publish(newStreamEvent(runID, event))
 	}))
 
@@ -160,6 +180,14 @@ func (s *Server) executeScanWorkflow(runID string, req scanRequest) {
 		Summary: summary,
 	}
 	s.store.Save(run.ID, run.Summary)
+
+	if runErr != nil {
+		errMsg := runErr.Error()
+		if summary.Error != "" {
+			errMsg = summary.Error
+		}
+		s.assets.FinalizeTasksByRun(runID, domain.ScanTaskFailed, errMsg)
+	}
 
 	// Publish final event.
 	if runErr != nil {

@@ -96,3 +96,48 @@ func (s *Store) ListTasksByRun(runID string) []*domain.ScanTask {
 	}
 	return tasks
 }
+
+// UpdateTasksByRun updates all tasks for a run.
+func (s *Store) UpdateTasksByRun(runID, status, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tasks {
+		if t.ParentID != runID {
+			continue
+		}
+		t.Status = status
+		if errMsg != "" {
+			t.Error = errMsg
+		}
+	}
+}
+
+// UpdatePendingTasksByRun updates only pending tasks for a run.
+func (s *Store) UpdatePendingTasksByRun(runID, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tasks {
+		if t.ParentID != runID || t.Status != domain.ScanTaskPending {
+			continue
+		}
+		t.Status = status
+	}
+}
+
+// FinalizeTasksByRun marks unfinished tasks for a run with the final status.
+func (s *Store) FinalizeTasksByRun(runID, status, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tasks {
+		if t.ParentID != runID {
+			continue
+		}
+		if t.Status == domain.ScanTaskFailed || t.Status == domain.ScanTaskDone || t.Status == domain.ScanTaskSkipped {
+			continue
+		}
+		t.Status = status
+		if errMsg != "" {
+			t.Error = errMsg
+		}
+	}
+}

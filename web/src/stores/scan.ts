@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ScanTask, StoredRun } from '@/types'
-import { startScan, fetchTasks, fetchRuns } from '@/api/scan'
+import { startScan, fetchTasks, fetchRuns, fetchRunById } from '@/api/scan'
 import type { ScanRequest } from '@/types'
 
 export const useScanStore = defineStore('scan', () => {
   const tasks = ref<ScanTask[]>([])
   const runs = ref<StoredRun[]>([])
   const currentRunId = ref('')
+  const currentRun = ref<StoredRun | null>(null)
   const scanning = ref(false)
   const error = ref('')
 
@@ -18,6 +19,7 @@ export const useScanStore = defineStore('scan', () => {
       const resp = await startScan(req)
       currentRunId.value = resp.run_id
       tasks.value = resp.tasks
+      await loadRun(resp.run_id)
       return resp
     } catch (e: any) {
       error.value = e.message
@@ -45,5 +47,32 @@ export const useScanStore = defineStore('scan', () => {
     }
   }
 
-  return { tasks, runs, currentRunId, scanning, error, scan, loadTasks, loadRuns }
+  async function loadRun(id = currentRunId.value) {
+    if (!id) return null
+    try {
+      currentRunId.value = id
+      const resp = await fetchRunById(id)
+      currentRun.value = resp.run
+      return resp.run
+    } catch (e: any) {
+      error.value = e.message
+      throw e
+    }
+  }
+
+  async function loadLatestRun() {
+    try {
+      const resp = await fetchRuns(1)
+      runs.value = resp.runs
+      const latest = resp.runs[0] || null
+      currentRun.value = latest
+      currentRunId.value = latest?.id || ''
+      return latest
+    } catch (e: any) {
+      error.value = e.message
+      return null
+    }
+  }
+
+  return { tasks, runs, currentRunId, currentRun, scanning, error, scan, loadTasks, loadRuns, loadRun, loadLatestRun }
 })

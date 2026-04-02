@@ -63,6 +63,21 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
 venv_ready() { [[ -x "$1/bin/python" ]] && "$1/bin/python" -c "import sys" >/dev/null 2>&1; }
+ensure_writable_dir() {
+  local dir="$1"
+  local probe
+  mkdir -p "$dir" 2>/dev/null || return 1
+  probe="$dir/.penframe-write-test.$$"
+  if ! : >"$probe" 2>/dev/null; then
+    return 1
+  fi
+  rm -f "$probe" 2>/dev/null || true
+  return 0
+}
+build_portal_binary() {
+  local output_path="$1"
+  go build -o "$output_path" ./cmd/portal 2>&1
+}
 ensure_started() {
   local pid="$1"
   local name="$2"
@@ -92,8 +107,42 @@ ok "node:    $(node --version)"
 
 # ---------- Go 构建 ----------
 info "Building Go API server..."
-go build -o bin/portal ./cmd/portal 2>&1 || fail "Go build failed"
-ok "Go binary: bin/portal"
+PORTAL_BIN_DIR_DEFAULT="$ROOT/bin"
+PORTAL_BIN_DIR_FALLBACK="/tmp/penframe/bin"
+PORTAL_BIN_DIR="${PENFRAME_BIN_DIR:-$PORTAL_BIN_DIR_DEFAULT}"
+BUILD_OUTPUT=""
+
+if [[ -z "${PENFRAME_BIN_DIR:-}" && "$ROOT" == /mnt/* ]]; then
+  PORTAL_BIN_DIR="$PORTAL_BIN_DIR_FALLBACK"
+fi
+
+if ! ensure_writable_dir "$PORTAL_BIN_DIR"; then
+  if [[ "$PORTAL_BIN_DIR" != "$PORTAL_BIN_DIR_FALLBACK" ]]; then
+    warn "Build output directory is not writable: $PORTAL_BIN_DIR; falling back to $PORTAL_BIN_DIR_FALLBACK"
+    PORTAL_BIN_DIR="$PORTAL_BIN_DIR_FALLBACK"
+  fi
+  ensure_writable_dir "$PORTAL_BIN_DIR" || fail "Failed to prepare writable build directory"
+fi
+
+PORTAL_BIN="$PORTAL_BIN_DIR/portal"
+if ! BUILD_OUTPUT="$(build_portal_binary "$PORTAL_BIN")"; then
+  if [[ -n "$BUILD_OUTPUT" ]]; then
+    echo "$BUILD_OUTPUT"
+  fi
+  if [[ -z "${PENFRAME_BIN_DIR:-}" && "$PORTAL_BIN_DIR" != "$PORTAL_BIN_DIR_FALLBACK" ]]; then
+    warn "Go build failed in $PORTAL_BIN_DIR; retrying with $PORTAL_BIN_DIR_FALLBACK"
+    PORTAL_BIN_DIR="$PORTAL_BIN_DIR_FALLBACK"
+    ensure_writable_dir "$PORTAL_BIN_DIR" || fail "Failed to prepare writable build directory"
+    PORTAL_BIN="$PORTAL_BIN_DIR/portal"
+    BUILD_OUTPUT="$(build_portal_binary "$PORTAL_BIN")" || {
+      [[ -n "$BUILD_OUTPUT" ]] && echo "$BUILD_OUTPUT"
+      fail "Go build failed"
+    }
+  else
+    fail "Go build failed"
+  fi
+fi
+ok "Go binary: $PORTAL_BIN"
 
 # ---------- Python 依赖 ----------
 EXP_VENV_DEFAULT="$ROOT/examples/exp/.venv"
@@ -163,9 +212,13 @@ trap cleanup EXIT INT TERM
 # ---------- 启动 Python Exp 服务 ----------
 if [[ "$SKIP_EXP" != "true" ]]; then
   info "Starting Python Exp service on port ${EXP_PORT}..."
-  (cd examples/exp && "$EXP_VENV/bin/uvicorn" server:app \
-    --host 0.0.0.0 --port "$EXP_PORT" \
-    --log-level info 2>&1 | sed "s/^/  ${YELLOW}[EXP]${NC} /") &
+  (
+    cd examples/exp || exit 1
+    exec "$EXP_VENV/bin/uvicorn" server:app \
+      --host 0.0.0.0 --port "$EXP_PORT" \
+      --log-level info \
+      > >(sed "s/^/  ${YELLOW}[EXP]${NC} /") 2>&1
+  ) &
   PIDS+=($!)
   ensure_started "${PIDS[-1]}" "Exp service" "$EXP_PORT" 3
   ok "Exp service: http://localhost:${EXP_PORT}"
@@ -178,11 +231,14 @@ if [[ "$SKIP_EXP" != "true" ]]; then
 fi
 
 info "Starting Go API server on port ${API_PORT}..."
-./bin/portal \
-  -listen ":${API_PORT}" \
-  -tools "$TOOLS" \
-  -workflow "$WORKFLOW" \
-  $EXP_FLAG 2>&1 | sed "s/^/  ${CYAN}[API]${NC} /" &
+(
+  exec "$PORTAL_BIN" \
+    -listen ":${API_PORT}" \
+    -tools "$TOOLS" \
+    -workflow "$WORKFLOW" \
+    $EXP_FLAG \
+    > >(sed "s/^/  ${CYAN}[API]${NC} /") 2>&1
+) &
 PIDS+=($!)
 ensure_started "${PIDS[-1]}" "API server" "$API_PORT" 3
 ok "API server: http://localhost:${API_PORT}"
@@ -190,7 +246,11 @@ ok "API server: http://localhost:${API_PORT}"
 # ---------- 启动 Vue Dev Server ----------
 if [[ "$SKIP_WEB" != "true" ]]; then
   info "Starting Vue dev server on port ${WEB_PORT}..."
-  (cd web && node node_modules/vite/bin/vite.js --port "$WEB_PORT" --host 2>&1 | sed "s/^/  ${GREEN}[WEB]${NC} /") &
+  (
+    cd web || exit 1
+    exec node node_modules/vite/bin/vite.js --port "$WEB_PORT" --host \
+      > >(sed "s/^/  ${GREEN}[WEB]${NC} /") 2>&1
+  ) &
   PIDS+=($!)
   ensure_started "${PIDS[-1]}" "Vue frontend" "$WEB_PORT" 4
   ok "Vue frontend: http://localhost:${WEB_PORT}"

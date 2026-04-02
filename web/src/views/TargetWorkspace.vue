@@ -1,72 +1,64 @@
 <template>
-  <div class="scan-control">
-    <h1>Scan Control</h1>
+  <div class="target-workspace">
+    <h1>Target Workspace</h1>
 
-    <el-card shadow="hover" class="scan-form-card">
+    <el-card shadow="hover" class="workspace-card">
       <template #header>
-        <span>Start Scan</span>
+        <span>Target</span>
       </template>
-      <el-form label-width="120px" @submit.prevent="doScan">
-        <el-form-item label="Target">
+      <el-form label-width="120px" @submit.prevent="startTargetScan">
+        <el-form-item label="Target Address">
           <el-input
-            v-model="form.target"
+            v-model="targetForm.target"
             placeholder="IP / CIDR / Domain / URL (e.g. https://target:3000)"
             clearable
           />
         </el-form-item>
         <el-form-item label="Strategy">
-          <el-radio-group v-model="form.strategy">
+          <el-radio-group v-model="targetForm.strategy">
             <el-radio-button value="full">Full</el-radio-button>
             <el-radio-button value="recon">Recon</el-radio-button>
             <el-radio-button value="discovery">Discovery</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="Timeout (s)">
-          <el-input-number v-model="form.timeout" :min="30" :max="86400" :step="60" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="doScan" :loading="scanStore.scanning">
-            Start Scan
-          </el-button>
+          <el-input-number v-model="targetForm.timeout" :min="30" :max="86400" :step="60" />
         </el-form-item>
       </el-form>
     </el-card>
 
-    <el-card shadow="hover" style="margin-top: 20px;">
+    <el-card shadow="hover" class="workspace-card">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>{{ scanStore.currentRunId ? 'Current Run Tasks' : 'Scan Tasks' }}</span>
-          <el-button size="small" @click="scanStore.loadTasks()">Refresh</el-button>
-        </div>
+        <span>Actions</span>
       </template>
-      <el-table :data="currentRunTasks" style="width: 100%" size="small" stripe>
-        <el-table-column prop="id" label="Task ID" width="200" show-overflow-tooltip />
-        <el-table-column prop="type" label="Type" width="140">
-          <template #default="{ row }">
-            <el-tag size="small" :type="typeTagColor(row.type)">{{ row.type }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="target" label="Target" show-overflow-tooltip />
-        <el-table-column prop="status" label="Status" width="100">
-          <template #default="{ row }">
-            <el-tag
-              size="small"
-              :type="row.status === 'done' ? 'success' : row.status === 'running' ? 'warning' : row.status === 'failed' ? 'danger' : 'info'"
-            >
-              {{ row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="error" label="Error" show-overflow-tooltip />
-      </el-table>
+      <div class="actions-row">
+        <el-button type="primary" :loading="scanStore.scanning" @click="startTargetScan">
+          Start Scan
+        </el-button>
+        <el-button @click="refreshCurrentRun" :disabled="!scanStore.currentRunId">
+          Refresh Result
+        </el-button>
+      </div>
+
+      <div class="actions-row actions-row-secondary">
+        <el-select v-model="selectedExploitId" placeholder="Select exploit module" clearable style="width: 280px;">
+          <el-option
+            v-for="item in exploits"
+            :key="item.id"
+            :label="`${item.id} · ${item.name}`"
+            :value="item.id"
+          />
+        </el-select>
+        <el-button @click="loadExploits" :loading="loadingExploits">Refresh Modules</el-button>
+        <el-button type="danger" :loading="executingExploit" @click="executeExploit">
+          Execute Exploit
+        </el-button>
+      </div>
     </el-card>
 
-    <el-card v-if="scanStore.currentRun" shadow="hover" style="margin-top: 20px;">
+    <el-card v-if="scanStore.currentRun" shadow="hover" class="workspace-card">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>Latest Scan Result</span>
-          <el-button size="small" @click="refreshCurrentRun">Refresh</el-button>
-        </div>
+        <span>Scan Result</span>
       </template>
 
       <el-descriptions :column="2" border size="small">
@@ -82,7 +74,7 @@
         <el-descriptions-item label="Error">{{ scanStore.currentRun.summary.error || '-' }}</el-descriptions-item>
       </el-descriptions>
 
-      <h4 style="margin: 16px 0 8px; color: #e5e5e5;">Node Results</h4>
+      <h4 class="section-title">Node Results</h4>
       <el-table :data="nodeResults" style="width: 100%" size="small" stripe>
         <el-table-column prop="node_id" label="Node" width="160" />
         <el-table-column prop="tool" label="Tool" width="140" />
@@ -104,7 +96,7 @@
       </el-table>
     </el-card>
 
-    <el-card v-if="directOutputs.length" shadow="hover" style="margin-top: 20px;">
+    <el-card v-if="directOutputs.length" shadow="hover" class="workspace-card">
       <template #header>
         <span>Direct Output</span>
       </template>
@@ -123,42 +115,46 @@
       </el-collapse>
     </el-card>
 
+    <el-card v-if="exploitResult" shadow="hover" class="workspace-card">
+      <template #header>
+        <span>Exploit Result</span>
+      </template>
+      <pre class="result-output">{{ JSON.stringify(exploitResult, null, 2) }}</pre>
+    </el-card>
+
     <el-alert
       v-if="scanStore.error"
       :title="scanStore.error"
       type="error"
       closable
-      style="margin-top: 16px;"
+      class="workspace-alert"
       @close="scanStore.error = ''"
-    />
-
-    <el-alert
-      v-if="lastRunId"
-      :title="`Scan started: ${lastRunId}`"
-      type="success"
-      closable
-      style="margin-top: 16px;"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useScanStore } from '@/stores/scan'
 import { useSSEStore } from '@/stores/sse'
-import { ElMessage } from 'element-plus'
-import type { NodeRunResult } from '@/types'
+import { listExploits, triggerExploit } from '@/api/exploit'
+import type { ExploitInfo, NodeRunResult } from '@/types'
 
 const scanStore = useScanStore()
 const sseStore = useSSEStore()
 
-const form = ref({
+const targetForm = ref({
   target: '',
   strategy: 'full',
   timeout: 1800,
 })
 
-const lastRunId = ref('')
+const exploits = ref<ExploitInfo[]>([])
+const selectedExploitId = ref('')
+const loadingExploits = ref(false)
+const executingExploit = ref(false)
+const exploitResult = ref<any>(null)
 let unsubscribe: (() => void) | null = null
 
 type DirectOutput = {
@@ -167,11 +163,6 @@ type DirectOutput = {
   status: string
   content: string
 }
-
-const currentRunTasks = computed(() => {
-  if (!scanStore.currentRunId) return scanStore.tasks
-  return scanStore.tasks.filter((task) => task.parent_id === scanStore.currentRunId)
-})
 
 const nodeResults = computed<NodeRunResult[]>(() => {
   const run = scanStore.currentRun
@@ -219,18 +210,17 @@ const directOutputs = computed<DirectOutput[]>(() => {
   return outputs
 })
 
-async function doScan() {
-  if (!form.value.target.trim()) {
+async function startTargetScan() {
+  if (!targetForm.value.target.trim()) {
     ElMessage.warning('Please enter a target')
     return
   }
   try {
     const resp = await scanStore.scan({
-      target: form.value.target.trim(),
-      strategy: form.value.strategy,
-      timeout_seconds: form.value.timeout,
+      target: targetForm.value.target.trim(),
+      strategy: targetForm.value.strategy,
+      timeout_seconds: targetForm.value.timeout,
     })
-    lastRunId.value = resp.run_id
     ElMessage.success(`Scan started: ${resp.run_id}`)
   } catch (e: any) {
     ElMessage.error(e.message)
@@ -247,16 +237,34 @@ async function refreshCurrentRun() {
   }
 }
 
-function typeTagColor(type: string): string {
-  const colors: Record<string, string> = {
-    seed: 'info',
-    host_discovery: '',
-    port_scan: 'warning',
-    path_scan: 'success',
-    vuln_scan: 'danger',
-    exploit: 'danger',
+async function loadExploits() {
+  loadingExploits.value = true
+  try {
+    const resp = await listExploits()
+    exploits.value = resp.exploits || []
+  } catch (e: any) {
+    ElMessage.warning(`Could not load exploits: ${e.message}`)
+    exploits.value = []
+  } finally {
+    loadingExploits.value = false
   }
-  return colors[type] || 'info'
+}
+
+async function executeExploit() {
+  if (!targetForm.value.target.trim()) {
+    ElMessage.warning('Please enter a target')
+    return
+  }
+  executingExploit.value = true
+  try {
+    const resp = await triggerExploit(targetForm.value.target.trim(), selectedExploitId.value || undefined)
+    exploitResult.value = resp
+    ElMessage.success('Exploit executed')
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    executingExploit.value = false
+  }
 }
 
 function runStatusTag(status: string): string {
@@ -274,7 +282,7 @@ function formatDate(iso: string) {
 
 onMounted(() => {
   void (async () => {
-    await scanStore.loadTasks()
+    await loadExploits()
     if (!scanStore.currentRunId) {
       await scanStore.loadLatestRun()
     }
@@ -296,14 +304,48 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.scan-control h1 {
+.target-workspace h1 {
   color: #e5e5e5;
   margin-bottom: 20px;
 }
 
-.scan-form-card {
-  background: #1d1e1f;
-  border-color: #303030;
+.workspace-card {
+  margin-bottom: 20px;
+}
+
+.actions-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions-row-secondary {
+  margin-top: 14px;
+}
+
+.section-title {
+  margin: 16px 0 8px;
+  color: #e5e5e5;
+}
+
+.result-output {
+  margin: 0;
+  background: #0d0d0d;
+  color: #d4d7de;
+  padding: 16px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.workspace-alert {
+  margin-top: 16px;
 }
 
 .output-title {
@@ -312,19 +354,5 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.result-output {
-  margin: 0;
-  padding: 16px;
-  border-radius: 6px;
-  background: #0d0d0d;
-  color: #d4d7de;
-  font-family: monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 </style>

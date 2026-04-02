@@ -15,6 +15,10 @@
           <el-icon><Monitor /></el-icon>
           <span>Dashboard</span>
         </el-menu-item>
+        <el-menu-item index="/target">
+          <el-icon><Aim /></el-icon>
+          <span>Target Workspace</span>
+        </el-menu-item>
         <el-menu-item index="/assets">
           <el-icon><Share /></el-icon>
           <span>Asset Graph</span>
@@ -51,7 +55,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Monitor, Share, Search, List, Document } from '@element-plus/icons-vue'
+import { Monitor, Share, Search, List, Document, Aim } from '@element-plus/icons-vue'
 import { useSSEStore } from '@/stores/sse'
 
 // Lightning icon placeholder since it may not exist in the icon pack.

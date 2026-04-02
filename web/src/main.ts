@@ -7,6 +7,7 @@ import 'element-plus/dist/index.css'
 import App from './App.vue'
 
 import Dashboard from './views/Dashboard.vue'
+import TargetWorkspace from './views/TargetWorkspace.vue'
 import AssetGraph from './views/AssetGraph.vue'
 import ScanControl from './views/ScanControl.vue'
 import ExploitPanel from './views/ExploitPanel.vue'
@@ -17,6 +18,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'dashboard', component: Dashboard },
+    { path: '/target', name: 'target', component: TargetWorkspace },
     { path: '/assets', name: 'assets', component: AssetGraph },
     { path: '/scan', name: 'scan', component: ScanControl },
     { path: '/exploit', name: 'exploit', component: ExploitPanel },
@@ -24,6 +26,7 @@ const router = createRouter({
     { path: '/logs', name: 'logs', component: LogViewer },
   ],
 })
+
 
 const app = createApp(App)
 app.use(createPinia())
