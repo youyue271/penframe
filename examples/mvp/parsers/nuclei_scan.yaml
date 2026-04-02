@@ -1,5 +1,0 @@
-tool: nuclei_scan
-rules:
-  - name: nuclei_cve_finding
-    regex: "(?m)^\\[(?P<template_id>[A-Za-z0-9._:-]+)\\]\\s+\\[(?P<protocol>[A-Za-z0-9_-]+)\\]\\s+\\[(?P<severity>info|low|medium|high|critical|unknown)\\]\\s+(?P<target>\\S+).*$"
-    save_to: assets.security.cve_findings

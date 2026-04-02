@@ -58,11 +58,15 @@ type Workflow struct {
 }
 
 type WorkflowNode struct {
-	ID       string         `yaml:"id" json:"id"`
-	Tool     string         `yaml:"tool" json:"tool"`
-	Executor string         `yaml:"executor" json:"executor"`
-	Inputs   map[string]any `yaml:"inputs,omitempty" json:"inputs,omitempty"`
-	Mock     MockConfig     `yaml:"mock,omitempty" json:"mock,omitempty"`
+	ID              string         `yaml:"id" json:"id"`
+	Tool            string         `yaml:"tool" json:"tool"`
+	Executor        string         `yaml:"executor" json:"executor"`
+	Shell           string         `yaml:"shell,omitempty" json:"shell,omitempty"`
+	Env             map[string]any `yaml:"env,omitempty" json:"env,omitempty"`
+	TimeoutSeconds  int            `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
+	ContinueOnError bool           `yaml:"continue_on_error,omitempty" json:"continue_on_error,omitempty"`
+	Inputs          map[string]any `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Mock            MockConfig     `yaml:"mock,omitempty" json:"mock,omitempty"`
 }
 
 type MockConfig struct {
@@ -85,6 +89,78 @@ type ParsedRecord struct {
 	Rule   string            `json:"rule"`
 	Path   string            `json:"path"`
 	Fields map[string]string `json:"fields"`
+}
+
+// Asset graph models for layered scanning.
+
+type AssetHost struct {
+	ID       string      `json:"id"`
+	IP       string      `json:"ip"`
+	Hostname string      `json:"hostname,omitempty"`
+	Ports    []AssetPort `json:"ports,omitempty"`
+	Status   string      `json:"status"` // alive/unknown
+	Source   string      `json:"source,omitempty"`
+}
+
+type AssetPort struct {
+	ID       string      `json:"id"`
+	HostID   string      `json:"host_id"`
+	Port     int         `json:"port"`
+	Protocol string      `json:"protocol"`
+	Service  string      `json:"service,omitempty"`
+	Banner   string      `json:"banner,omitempty"`
+	Paths    []AssetPath `json:"paths,omitempty"`
+	Vulns    []AssetVuln `json:"vulns,omitempty"`
+	Source   string      `json:"source,omitempty"`
+}
+
+type AssetPath struct {
+	ID         string `json:"id"`
+	PortID     string `json:"port_id"`
+	Path       string `json:"path"`
+	StatusCode int    `json:"status_code"`
+	Title      string `json:"title,omitempty"`
+	Tech       string `json:"tech,omitempty"`
+	Source     string `json:"source,omitempty"`
+}
+
+type AssetVuln struct {
+	ID       string `json:"id"`
+	PortID   string `json:"port_id,omitempty"`
+	PathID   string `json:"path_id,omitempty"`
+	CVE      string `json:"cve,omitempty"`
+	Name     string `json:"name"`
+	Severity string `json:"severity"`
+	Source   string `json:"source"`
+	ExpAvail bool   `json:"exp_available"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+const (
+	ScanTypeSeed           = "seed"
+	ScanTypeHostDiscovery  = "host_discovery"
+	ScanTypePortScan       = "port_scan"
+	ScanTypePathScan       = "path_scan"
+	ScanTypeVulnScan       = "vuln_scan"
+	ScanTypeExploit        = "exploit"
+)
+
+const (
+	ScanTaskPending  = "pending"
+	ScanTaskRunning  = "running"
+	ScanTaskDone     = "done"
+	ScanTaskFailed   = "failed"
+	ScanTaskSkipped  = "skipped"
+)
+
+type ScanTask struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Target    string `json:"target"`
+	Status    string `json:"status"`
+	ParentID  string `json:"parent_id,omitempty"`
+	NodeID    string `json:"node_id,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type RunStats struct {

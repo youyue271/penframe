@@ -16,6 +16,16 @@ output/
 tmp/
 *.log
 
+# Local examples / playground data
+examples/
+
+# Local agent metadata
+.codex
+
+# Frontend dependencies
+node_modules/
+web/node_modules/
+
 # Editor / OS files
 .DS_Store
 Thumbs.db

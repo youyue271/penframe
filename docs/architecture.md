@@ -2,7 +2,7 @@
 
 ## Current Scope
 
-This repository currently implements the orchestration core for a safe MVP:
+This repository implements the orchestration core:
 
 - `Portal`: not implemented yet
 - `Orchestrator`: implemented as Go packages under `internal/workflow`, `internal/parser`, `internal/tooling`, `internal/config`
@@ -28,6 +28,7 @@ Current interface:
 
 - Embedded HTTP server serving a dashboard and JSON API
 - `POST /api/run` for demo workflow execution
+- `GET /api/events` for SSE lifecycle updates
 - `GET /api/state` for workflow metadata and recent runs
 - `GET /api/runs` and `GET /api/runs/{id}` for run lookup
 - `POST /api/reload` for config reload without restarting the server
@@ -35,7 +36,7 @@ Current interface:
 Suggested next interface:
 
 - Add workflow submission and run lookup beyond the demo config
-- WebSocket or SSE stream for node state updates
+- Add node log tailing on top of the existing SSE lifecycle stream
 
 ### 2. Orchestrator
 
@@ -70,22 +71,24 @@ Current implementation:
 
 - `mock` executor reading fixture files
 - `local` executor running rendered command templates
+- `local` follows the current `$SHELL` by default and can be overridden per workflow node
+- `local` supports per-node environment overrides for cases like proxy and DNS control
 - in WSL, `local` auto-switches to `powershell.exe` when the command target is `.exe`
-
-Why this boundary exists:
-
-- It keeps the orchestration core testable without binding the project to any offensive runtime channel.
 
 Extension points:
 
 - `Executor` interface in `internal/executor/executor.go`
 - Each executor can decide how to transform rendered inputs into execution results
 
-Safe next steps:
+Suggested next steps:
 
 - Add command auditing and allowlists
 - Add per-node timeout and environment controls
 - Add realtime stdout/stderr streaming
+- Implement WebShell / VShell / C2 bridge adapters
+- Implement pivoting agents and reverse connection channels
+- Implement automated exploit execution modules
+- Implement autonomous attack-path generation
 
 ### 4. Storage
 
@@ -121,13 +124,13 @@ That gives you a stable seam for:
 - report generation
 - frontend graph rendering
 
-## Deliberately Omitted
+## Planned Capabilities
 
-The repository does not implement:
+The following capabilities are planned for implementation to support real-world penetration testing:
 
-- WebShell / VShell / C2 bridges
-- pivoting agents or reverse connection channels
-- automated exploit execution
-- autonomous attack-path generation
+- WebShell / VShell / C2 bridge adapters
+- Pivoting agents and reverse connection channels
+- Automated exploit execution
+- Autonomous attack-path generation
 
-Those capabilities materially increase offensive reach. The current code keeps the project at the orchestration-model layer so you can settle interfaces and data contracts first.
+These will be implemented as executor extensions and workflow modules to enable full-scope penetration testing workflows.

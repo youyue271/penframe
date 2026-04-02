@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"penframe/internal/domain"
 	"penframe/internal/executor"
@@ -16,11 +17,13 @@ import (
 
 type recordingExecutor struct {
 	inputsByNode map[string]map[string]any
+	envByNode    map[string]map[string]any
 }
 
 func newRecordingExecutor() *recordingExecutor {
 	return &recordingExecutor{
 		inputsByNode: map[string]map[string]any{},
+		envByNode:    map[string]map[string]any{},
 	}
 }
 
@@ -33,7 +36,12 @@ func (e *recordingExecutor) Execute(_ context.Context, node domain.WorkflowNode,
 	for key, value := range renderedInputs {
 		clonedInputs[key] = value
 	}
+	clonedEnv := make(map[string]any, len(node.Env))
+	for key, value := range node.Env {
+		clonedEnv[key] = value
+	}
 	e.inputsByNode[node.ID] = clonedInputs
+	e.envByNode[node.ID] = clonedEnv
 	return domain.ExecutionResult{
 		Stdout: node.ID,
 	}, nil
@@ -174,6 +182,127 @@ func TestRunnerMarksBlockedNodesAsSkipped(t *testing.T) {
 	}
 }
 
+func TestRunnerRendersNodeEnv(t *testing.T) {
+	execImpl := newRecordingExecutor()
+	runner := NewRunner(
+		tooling.NewRegistry(map[string]domain.ToolDefinition{
+			"seed": {Name: "seed"},
+		}),
+		executor.NewRegistry(execImpl),
+		parser.NewEngine(),
+		NewMiniExprEvaluator(),
+	)
+
+	wf := domain.Workflow{
+		Name: "env-workflow",
+		GlobalVars: map[string]any{
+			"proxy_url": "http://127.0.0.1:8080",
+			"target":    "https://demo.example:3000/apps",
+		},
+		Nodes: []domain.WorkflowNode{
+			{
+				ID:       "seed",
+				Tool:     "seed",
+				Executor: "recording",
+				Env: map[string]any{
+					"HTTP_PROXY": "{{ .vars.proxy_url }}",
+					"NO_PROXY":   "{{ .vars.target_host }}",
+				},
+			},
+		},
+	}
+
+	summary, err := runner.Run(context.Background(), wf)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if summary.Status != domain.RunStatusSucceeded {
+		t.Fatalf("expected run status %q, got %q", domain.RunStatusSucceeded, summary.Status)
+	}
+
+	renderedEnv := execImpl.envByNode["seed"]
+	if got := renderedEnv["HTTP_PROXY"]; got != "http://127.0.0.1:8080" {
+		t.Fatalf("expected rendered HTTP_PROXY, got %#v", got)
+	}
+	if got := renderedEnv["NO_PROXY"]; got != "demo.example" {
+		t.Fatalf("expected rendered NO_PROXY demo.example, got %#v", got)
+	}
+}
+
+func TestRunnerEmitsLifecycleEvents(t *testing.T) {
+	execImpl := newRecordingExecutor()
+	runner := NewRunner(
+		tooling.NewRegistry(map[string]domain.ToolDefinition{
+			"seed":  {Name: "seed"},
+			"child": {Name: "child"},
+		}),
+		executor.NewRegistry(execImpl),
+		parser.NewEngine(),
+		NewMiniExprEvaluator(),
+	)
+
+	var events []Event
+	ctx := WithEventObserver(context.Background(), EventObserverFunc(func(event Event) {
+		events = append(events, event)
+	}))
+	wf := domain.Workflow{
+		Name: "event-workflow",
+		Nodes: []domain.WorkflowNode{
+			{ID: "seed", Tool: "seed", Executor: "recording"},
+			{ID: "child", Tool: "child", Executor: "recording"},
+		},
+		Edges: []domain.WorkflowEdge{
+			{From: "seed", To: "child", Condition: "false"},
+		},
+	}
+
+	summary, err := runner.Run(ctx, wf)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if summary.Status != domain.RunStatusSucceeded {
+		t.Fatalf("expected run status %q, got %q", domain.RunStatusSucceeded, summary.Status)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events, got %d", len(events))
+	}
+
+	gotTypes := make([]string, 0, len(events))
+	for _, event := range events {
+		gotTypes = append(gotTypes, event.Type)
+	}
+	wantTypes := []string{
+		EventRunStarted,
+		EventNodeStarted,
+		EventNodeFinished,
+		EventNodeFinished,
+		EventRunFinished,
+	}
+	if strings.Join(gotTypes, ",") != strings.Join(wantTypes, ",") {
+		t.Fatalf("unexpected event types: got %v want %v", gotTypes, wantTypes)
+	}
+
+	if events[0].Summary == nil || events[0].Summary.Status != domain.RunStatusRunning {
+		t.Fatalf("expected run_started summary with running status, got %#v", events[0].Summary)
+	}
+	if events[1].Node == nil || events[1].Node.NodeID != "seed" || events[1].Node.Status != domain.NodeStatusRunning {
+		t.Fatalf("expected node_started event for seed, got %#v", events[1].Node)
+	}
+	if events[2].Node == nil || events[2].Node.NodeID != "seed" || events[2].Node.Status != domain.NodeStatusSucceeded {
+		t.Fatalf("expected node_finished success for seed, got %#v", events[2].Node)
+	}
+	if events[2].Summary == nil || events[2].Summary.Stats.SucceededNodes != 1 {
+		t.Fatalf("expected updated stats after seed, got %#v", events[2].Summary)
+	}
+	if events[3].Node == nil || events[3].Node.NodeID != "child" || events[3].Node.Status != domain.NodeStatusSkipped {
+		t.Fatalf("expected skipped child node event, got %#v", events[3].Node)
+	}
+	if events[4].Summary == nil || events[4].Summary.Status != domain.RunStatusSucceeded {
+		t.Fatalf("expected run_finished success summary, got %#v", events[4].Summary)
+	}
+}
+
 func TestRunnerReturnsFailedSummaryWithNodeError(t *testing.T) {
 	failingExec := failingExecutor{err: fmt.Errorf("boom")}
 	runner := NewRunner(
@@ -290,6 +419,92 @@ func TestOutputFileContentsSupportsUntypedArray(t *testing.T) {
 	}
 }
 
+func TestRunnerContinuesAfterContinueOnErrorFailure(t *testing.T) {
+	execImpl := newRecordingExecutor()
+	runner := NewRunner(
+		tooling.NewRegistry(map[string]domain.ToolDefinition{
+			"start":   {Name: "start"},
+			"fragile": {Name: "fragile"},
+			"steady":  {Name: "steady"},
+		}),
+		executor.NewRegistry(execImpl, failingExecutor{err: fmt.Errorf("boom")}),
+		parser.NewEngine(),
+		NewMiniExprEvaluator(),
+	)
+
+	wf := domain.Workflow{
+		Name: "continue-on-error-workflow",
+		Nodes: []domain.WorkflowNode{
+			{ID: "start", Tool: "start", Executor: "recording"},
+			{ID: "fragile", Tool: "fragile", Executor: "failing", ContinueOnError: true},
+			{ID: "steady", Tool: "steady", Executor: "recording"},
+		},
+		Edges: []domain.WorkflowEdge{
+			{From: "start", To: "fragile"},
+			{From: "start", To: "steady"},
+		},
+	}
+
+	summary, err := runner.Run(context.Background(), wf)
+	if err == nil {
+		t.Fatal("expected Run to return an error when some nodes fail")
+	}
+	if !strings.Contains(err.Error(), "fragile") {
+		t.Fatalf("expected error to mention failed node, got %v", err)
+	}
+	if got := summary.NodeResults["fragile"].Status; got != domain.NodeStatusFailed {
+		t.Fatalf("expected fragile to fail, got %q", got)
+	}
+	if got := summary.NodeResults["steady"].Status; got != domain.NodeStatusSucceeded {
+		t.Fatalf("expected steady to succeed, got %q", got)
+	}
+	if summary.Status != domain.RunStatusFailed {
+		t.Fatalf("expected overall status failed, got %q", summary.Status)
+	}
+}
+
+func TestRunnerAppliesNodeTimeout(t *testing.T) {
+	execImpl := newRecordingExecutor()
+	runner := NewRunner(
+		tooling.NewRegistry(map[string]domain.ToolDefinition{
+			"start": {Name: "start"},
+			"slow":  {Name: "slow"},
+			"after": {Name: "after"},
+		}),
+		executor.NewRegistry(execImpl, timeoutExecutor{}),
+		parser.NewEngine(),
+		NewMiniExprEvaluator(),
+	)
+
+	wf := domain.Workflow{
+		Name: "timeout-workflow",
+		Nodes: []domain.WorkflowNode{
+			{ID: "start", Tool: "start", Executor: "recording"},
+			{ID: "slow", Tool: "slow", Executor: "timeout", TimeoutSeconds: 1, ContinueOnError: true},
+			{ID: "after", Tool: "after", Executor: "recording"},
+		},
+		Edges: []domain.WorkflowEdge{
+			{From: "start", To: "slow"},
+			{From: "start", To: "after"},
+		},
+	}
+
+	startedAt := time.Now()
+	summary, err := runner.Run(context.Background(), wf)
+	if err == nil {
+		t.Fatal("expected Run to return an error when timeout node fails")
+	}
+	if time.Since(startedAt) > 3*time.Second {
+		t.Fatalf("expected timeout node to stop promptly, took %v", time.Since(startedAt))
+	}
+	if got := summary.NodeResults["slow"].Status; got != domain.NodeStatusFailed {
+		t.Fatalf("expected slow to fail, got %q", got)
+	}
+	if got := summary.NodeResults["after"].Status; got != domain.NodeStatusSucceeded {
+		t.Fatalf("expected after to succeed, got %q", got)
+	}
+}
+
 type failingExecutor struct {
 	err error
 }
@@ -300,4 +515,15 @@ func (failingExecutor) Name() string {
 
 func (e failingExecutor) Execute(_ context.Context, _ domain.WorkflowNode, _ domain.ToolDefinition, _ map[string]any, _ string) (domain.ExecutionResult, error) {
 	return domain.ExecutionResult{}, e.err
+}
+
+type timeoutExecutor struct{}
+
+func (timeoutExecutor) Name() string {
+	return "timeout"
+}
+
+func (timeoutExecutor) Execute(ctx context.Context, _ domain.WorkflowNode, _ domain.ToolDefinition, _ map[string]any, _ string) (domain.ExecutionResult, error) {
+	<-ctx.Done()
+	return domain.ExecutionResult{}, ctx.Err()
 }

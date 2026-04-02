@@ -16,6 +16,7 @@ import (
 	"penframe/internal/executor"
 	"penframe/internal/parser"
 	runtimepkg "penframe/internal/runtime"
+	"penframe/internal/targeting"
 	"penframe/internal/tooling"
 )
 
@@ -56,35 +57,55 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 			TotalNodes: len(wf.Nodes),
 		},
 	}
+	returnWithError := func(runSummary domain.RunSummary, runErr error) (domain.RunSummary, error) {
+		failedSummary, err := finishSummaryWithError(runSummary, runErr)
+		emitRunFinished(ctx, failedSummary)
+		return failedSummary, err
+	}
+	returnWithSuccess := func(runSummary domain.RunSummary) (domain.RunSummary, error) {
+		runSummary.FinishedAt = time.Now().UTC()
+		refreshRunStats(&runSummary)
+		if runSummary.Stats.FailedNodes > 0 {
+			runErr := summarizeFailedNodes(runSummary)
+			runSummary.Status = domain.RunStatusFailed
+			runSummary.Error = runErr.Error()
+			emitRunFinished(ctx, runSummary)
+			return runSummary, runErr
+		}
+		runSummary.Status = domain.RunStatusSucceeded
+		emitRunFinished(ctx, runSummary)
+		return runSummary, nil
+	}
+	emitRunStarted(ctx, summary)
 	nodes := make(map[string]domain.WorkflowNode, len(wf.Nodes))
 	incoming := make(map[string]int, len(wf.Nodes))
 	adjacency := make(map[string][]domain.WorkflowEdge)
 
 	for _, node := range wf.Nodes {
 		if node.ID == "" {
-			return finishSummaryWithError(summary, fmt.Errorf("workflow contains a node with empty id"))
+			return returnWithError(summary, fmt.Errorf("workflow contains a node with empty id"))
 		}
 		if _, exists := nodes[node.ID]; exists {
-			return finishSummaryWithError(summary, fmt.Errorf("workflow contains duplicate node id %q", node.ID))
+			return returnWithError(summary, fmt.Errorf("workflow contains duplicate node id %q", node.ID))
 		}
 		nodes[node.ID] = node
 		incoming[node.ID] = 0
 	}
 	for _, edge := range wf.Edges {
 		if _, ok := nodes[edge.From]; !ok {
-			return finishSummaryWithError(summary, fmt.Errorf("edge references unknown source node %q", edge.From))
+			return returnWithError(summary, fmt.Errorf("edge references unknown source node %q", edge.From))
 		}
 		if _, ok := nodes[edge.To]; !ok {
-			return finishSummaryWithError(summary, fmt.Errorf("edge references unknown target node %q", edge.To))
+			return returnWithError(summary, fmt.Errorf("edge references unknown target node %q", edge.To))
 		}
 		adjacency[edge.From] = append(adjacency[edge.From], edge)
 		incoming[edge.To]++
 	}
 	if err := r.validateWorkflowDependencies(nodes); err != nil {
-		return finishSummaryWithError(summary, err)
+		return returnWithError(summary, err)
 	}
 	if err := validateAcyclic(wf.Name, incoming, adjacency); err != nil {
-		return finishSummaryWithError(summary, err)
+		return returnWithError(summary, err)
 	}
 
 	resultEnv := make(map[string]any, len(wf.Nodes))
@@ -108,6 +129,7 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 		resultEnv[nodeResult.NodeID] = buildResultEnv(nodeResult)
 		resolved[nodeResult.NodeID] = true
 		refreshRunStats(&summary)
+		emitNodeFinished(ctx, nodeResult, summary)
 	}
 	skipNode := func(nodeID, reason string) {
 		if _, exists := summary.NodeResults[nodeID]; exists {
@@ -175,6 +197,42 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 		}
 		return nil
 	}
+	markDownstreamBlocked := func(sourceID, reason string) {
+		for _, edge := range adjacency[sourceID] {
+			blocked[edge.To] = true
+			if blockedReasons[edge.To] == "" {
+				blockedReasons[edge.To] = reason
+			}
+		}
+	}
+	handleNodeFailure := func(node domain.WorkflowNode, nodeStartedAt time.Time, renderedCommand string, renderedInputs map[string]any, execResult domain.ExecutionResult, nodeError string, runErr error) (bool, error) {
+		nodeFinishedAt := time.Now().UTC()
+		if renderedInputs == nil {
+			renderedInputs = map[string]any{}
+		}
+		recordNodeResult(domain.NodeRunResult{
+			NodeID:          node.ID,
+			Tool:            node.Tool,
+			Executor:        node.Executor,
+			Status:          domain.NodeStatusFailed,
+			RenderedCommand: renderedCommand,
+			Inputs:          renderedInputs,
+			Stdout:          execResult.Stdout,
+			Metadata:        execResult.Metadata,
+			Error:           nodeError,
+			StartedAt:       nodeStartedAt,
+			FinishedAt:      nodeFinishedAt,
+			DurationMillis:  nodeFinishedAt.Sub(nodeStartedAt).Milliseconds(),
+		}, true)
+		if !node.ContinueOnError {
+			return false, runErr
+		}
+		markDownstreamBlocked(node.ID, fmt.Sprintf("upstream node %q failed", node.ID))
+		if err := propagateResolution(node.ID, false); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 
 	for len(queue) > 0 {
 		nodeID := queue[0]
@@ -187,31 +245,39 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 
 		tool, err := r.tools.Get(node.Tool)
 		if err != nil {
-			recordNodeResult(domain.NodeRunResult{
-				NodeID:         node.ID,
-				Tool:           node.Tool,
-				Executor:       node.Executor,
-				Status:         domain.NodeStatusFailed,
-				Error:          err.Error(),
-				StartedAt:      nodeStartedAt,
-				FinishedAt:     time.Now().UTC(),
-				DurationMillis: time.Since(nodeStartedAt).Milliseconds(),
-			}, true)
-			return finishSummaryWithError(summary, fmt.Errorf("resolve tool for node %q: %w", node.ID, err))
+			continued, failureErr := handleNodeFailure(
+				node,
+				nodeStartedAt,
+				"",
+				nil,
+				domain.ExecutionResult{},
+				fmt.Sprintf("resolve tool: %v", err),
+				fmt.Errorf("resolve tool for node %q: %w", node.ID, err),
+			)
+			if failureErr != nil {
+				return returnWithError(summary, failureErr)
+			}
+			if continued {
+				continue
+			}
 		}
 		execImpl, err := r.executors.Get(node.Executor)
 		if err != nil {
-			recordNodeResult(domain.NodeRunResult{
-				NodeID:         node.ID,
-				Tool:           node.Tool,
-				Executor:       node.Executor,
-				Status:         domain.NodeStatusFailed,
-				Error:          err.Error(),
-				StartedAt:      nodeStartedAt,
-				FinishedAt:     time.Now().UTC(),
-				DurationMillis: time.Since(nodeStartedAt).Milliseconds(),
-			}, true)
-			return finishSummaryWithError(summary, fmt.Errorf("resolve executor for node %q: %w", node.ID, err))
+			continued, failureErr := handleNodeFailure(
+				node,
+				nodeStartedAt,
+				"",
+				nil,
+				domain.ExecutionResult{},
+				fmt.Sprintf("resolve executor: %v", err),
+				fmt.Errorf("resolve executor for node %q: %w", node.ID, err),
+			)
+			if failureErr != nil {
+				return returnWithError(summary, failureErr)
+			}
+			if continued {
+				continue
+			}
 		}
 
 		templateCtx := map[string]any{
@@ -225,22 +291,43 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 			},
 		}
 
-		renderedInputs, err := renderInputs(node.Inputs, templateCtx)
+		renderedInputs, err := renderDynamicMap(node.Inputs, "inputs", templateCtx)
 		if err != nil {
-			nodeFinishedAt := time.Now().UTC()
-			recordNodeResult(domain.NodeRunResult{
-				NodeID:         node.ID,
-				Tool:           node.Tool,
-				Executor:       node.Executor,
-				Status:         domain.NodeStatusFailed,
-				Inputs:         map[string]any{},
-				Error:          fmt.Sprintf("render inputs: %v", err),
-				StartedAt:      nodeStartedAt,
-				FinishedAt:     nodeFinishedAt,
-				DurationMillis: nodeFinishedAt.Sub(nodeStartedAt).Milliseconds(),
-			}, true)
-			return finishSummaryWithError(summary, fmt.Errorf("render inputs for node %q: %w", node.ID, err))
+			continued, failureErr := handleNodeFailure(
+				node,
+				nodeStartedAt,
+				"",
+				nil,
+				domain.ExecutionResult{},
+				fmt.Sprintf("render inputs: %v", err),
+				fmt.Errorf("render inputs for node %q: %w", node.ID, err),
+			)
+			if failureErr != nil {
+				return returnWithError(summary, failureErr)
+			}
+			if continued {
+				continue
+			}
 		}
+		renderedEnv, err := renderDynamicMap(node.Env, "env", templateCtx)
+		if err != nil {
+			continued, failureErr := handleNodeFailure(
+				node,
+				nodeStartedAt,
+				"",
+				nil,
+				domain.ExecutionResult{},
+				fmt.Sprintf("render env: %v", err),
+				fmt.Errorf("render env for node %q: %w", node.ID, err),
+			)
+			if failureErr != nil {
+				return returnWithError(summary, failureErr)
+			}
+			if continued {
+				continue
+			}
+		}
+		node.Env = renderedEnv
 
 		var renderedCommand string
 		if tool.CmdTemplate != "" {
@@ -248,80 +335,96 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 			commandCtx["inputs"] = renderedInputs
 			renderedCommand, err = runtimepkg.RenderString(tool.CmdTemplate, commandCtx)
 			if err != nil {
-				nodeFinishedAt := time.Now().UTC()
-				recordNodeResult(domain.NodeRunResult{
-					NodeID:          node.ID,
-					Tool:            node.Tool,
-					Executor:        node.Executor,
-					Status:          domain.NodeStatusFailed,
-					RenderedCommand: renderedCommand,
-					Inputs:          renderedInputs,
-					Error:           fmt.Sprintf("render command: %v", err),
-					StartedAt:       nodeStartedAt,
-					FinishedAt:      nodeFinishedAt,
-					DurationMillis:  nodeFinishedAt.Sub(nodeStartedAt).Milliseconds(),
-				}, true)
-				return finishSummaryWithError(summary, fmt.Errorf("render command for node %q: %w", node.ID, err))
+				continued, failureErr := handleNodeFailure(
+					node,
+					nodeStartedAt,
+					renderedCommand,
+					renderedInputs,
+					domain.ExecutionResult{},
+					fmt.Sprintf("render command: %v", err),
+					fmt.Errorf("render command for node %q: %w", node.ID, err),
+				)
+				if failureErr != nil {
+					return returnWithError(summary, failureErr)
+				}
+				if continued {
+					continue
+				}
 			}
 		}
 
-		execResult, err := execImpl.Execute(ctx, node, tool, renderedInputs, renderedCommand)
+		emitNodeStarted(ctx, domain.NodeRunResult{
+			NodeID:          node.ID,
+			Tool:            node.Tool,
+			Executor:        node.Executor,
+			Status:          domain.NodeStatusRunning,
+			RenderedCommand: renderedCommand,
+			Inputs:          renderedInputs,
+			StartedAt:       nodeStartedAt,
+		})
+
+		execCtx := ctx
+		cancelExec := func() {}
+		if node.TimeoutSeconds > 0 {
+			execCtx, cancelExec = context.WithTimeout(ctx, time.Duration(node.TimeoutSeconds)*time.Second)
+		}
+		execResult, err := execImpl.Execute(execCtx, node, tool, renderedInputs, renderedCommand)
+		cancelExec()
 		if err != nil {
-			nodeFinishedAt := time.Now().UTC()
-			recordNodeResult(domain.NodeRunResult{
-				NodeID:          node.ID,
-				Tool:            node.Tool,
-				Executor:        node.Executor,
-				Status:          domain.NodeStatusFailed,
-				RenderedCommand: renderedCommand,
-				Inputs:          renderedInputs,
-				Error:           fmt.Sprintf("execute node: %v", err),
-				StartedAt:       nodeStartedAt,
-				FinishedAt:      nodeFinishedAt,
-				DurationMillis:  nodeFinishedAt.Sub(nodeStartedAt).Milliseconds(),
-			}, true)
-			return finishSummaryWithError(summary, fmt.Errorf("execute node %q: %w", node.ID, err))
+			continued, failureErr := handleNodeFailure(
+				node,
+				nodeStartedAt,
+				renderedCommand,
+				renderedInputs,
+				execResult,
+				fmt.Sprintf("execute node: %v", err),
+				fmt.Errorf("execute node %q: %w", node.ID, err),
+			)
+			if failureErr != nil {
+				return returnWithError(summary, failureErr)
+			}
+			if continued {
+				continue
+			}
 		}
 
 		var records []domain.ParsedRecord
 		if tool.Parser != "" {
 			ruleSet, err := r.loadParserRuleSet(tool.Parser)
 			if err != nil {
-				nodeFinishedAt := time.Now().UTC()
-				recordNodeResult(domain.NodeRunResult{
-					NodeID:          node.ID,
-					Tool:            node.Tool,
-					Executor:        node.Executor,
-					Status:          domain.NodeStatusFailed,
-					RenderedCommand: renderedCommand,
-					Inputs:          renderedInputs,
-					Stdout:          execResult.Stdout,
-					Metadata:        execResult.Metadata,
-					Error:           fmt.Sprintf("load parser: %v", err),
-					StartedAt:       nodeStartedAt,
-					FinishedAt:      nodeFinishedAt,
-					DurationMillis:  nodeFinishedAt.Sub(nodeStartedAt).Milliseconds(),
-				}, true)
-				return finishSummaryWithError(summary, fmt.Errorf("load parser for node %q: %w", node.ID, err))
+				continued, failureErr := handleNodeFailure(
+					node,
+					nodeStartedAt,
+					renderedCommand,
+					renderedInputs,
+					execResult,
+					fmt.Sprintf("load parser: %v", err),
+					fmt.Errorf("load parser for node %q: %w", node.ID, err),
+				)
+				if failureErr != nil {
+					return returnWithError(summary, failureErr)
+				}
+				if continued {
+					continue
+				}
 			}
 			records, err = r.parser.Parse(ruleSet, parserInput(execResult), summary.Assets)
 			if err != nil {
-				nodeFinishedAt := time.Now().UTC()
-				recordNodeResult(domain.NodeRunResult{
-					NodeID:          node.ID,
-					Tool:            node.Tool,
-					Executor:        node.Executor,
-					Status:          domain.NodeStatusFailed,
-					RenderedCommand: renderedCommand,
-					Inputs:          renderedInputs,
-					Stdout:          execResult.Stdout,
-					Metadata:        execResult.Metadata,
-					Error:           fmt.Sprintf("parse output: %v", err),
-					StartedAt:       nodeStartedAt,
-					FinishedAt:      nodeFinishedAt,
-					DurationMillis:  nodeFinishedAt.Sub(nodeStartedAt).Milliseconds(),
-				}, true)
-				return finishSummaryWithError(summary, fmt.Errorf("parse node %q output: %w", node.ID, err))
+				continued, failureErr := handleNodeFailure(
+					node,
+					nodeStartedAt,
+					renderedCommand,
+					renderedInputs,
+					execResult,
+					fmt.Sprintf("parse output: %v", err),
+					fmt.Errorf("parse node %q output: %w", node.ID, err),
+				)
+				if failureErr != nil {
+					return returnWithError(summary, failureErr)
+				}
+				if continued {
+					continue
+				}
 			}
 		}
 		nodeFinishedAt := time.Now().UTC()
@@ -343,33 +446,31 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 		}, true)
 
 		if err := propagateResolution(node.ID, true); err != nil {
-			return finishSummaryWithError(summary, err)
+			return returnWithError(summary, err)
 		}
 	}
 
-	summary.FinishedAt = time.Now().UTC()
-	summary.Status = domain.RunStatusSucceeded
-	refreshRunStats(&summary)
-	return summary, nil
+	return returnWithSuccess(summary)
 }
 
-func renderInputs(inputs map[string]any, ctx map[string]any) (map[string]any, error) {
-	if len(inputs) == 0 {
+func renderDynamicMap(values map[string]any, label string, ctx map[string]any) (map[string]any, error) {
+	if len(values) == 0 {
 		return map[string]any{}, nil
 	}
-	rendered, err := runtimepkg.RenderValue(inputs, ctx)
+	rendered, err := runtimepkg.RenderValue(values, ctx)
 	if err != nil {
 		return nil, err
 	}
 	result, ok := rendered.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("rendered inputs have unexpected type %T", rendered)
+		return nil, fmt.Errorf("rendered %s have unexpected type %T", label, rendered)
 	}
 	return result, nil
 }
 
 func prepareRunVars(globalVars map[string]any) (map[string]any, error) {
 	vars := cloneMap(globalVars)
+	targeting.Ensure(vars)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -395,7 +496,7 @@ func prepareRunVars(globalVars map[string]any) (map[string]any, error) {
 }
 
 func resolveTargetIdentifier(vars map[string]any) string {
-	for _, key := range []string{"output_target", "target_host", "target_url", "target", "host", "url"} {
+	for _, key := range []string{"output_target", "target_hostport", "target_url", "target", "target_host", "host", "url"} {
 		if value, ok := vars[key]; ok {
 			if text := strings.TrimSpace(fmt.Sprint(value)); text != "" {
 				return text
@@ -546,6 +647,21 @@ func finishSummaryWithError(summary domain.RunSummary, err error) (domain.RunSum
 	summary.FinishedAt = time.Now().UTC()
 	refreshRunStats(&summary)
 	return summary, err
+}
+
+func summarizeFailedNodes(summary domain.RunSummary) error {
+	failedNodeIDs := make([]string, 0, summary.Stats.FailedNodes)
+	for _, nodeID := range summary.ExecutionOrder {
+		nodeResult, ok := summary.NodeResults[nodeID]
+		if !ok || nodeResult.Status != domain.NodeStatusFailed {
+			continue
+		}
+		failedNodeIDs = append(failedNodeIDs, nodeID)
+	}
+	if len(failedNodeIDs) == 0 {
+		return fmt.Errorf("workflow completed with failed nodes")
+	}
+	return fmt.Errorf("workflow completed with %d failed node(s): %s", len(failedNodeIDs), strings.Join(failedNodeIDs, ", "))
 }
 
 func (r *Runner) validateWorkflowDependencies(nodes map[string]domain.WorkflowNode) error {

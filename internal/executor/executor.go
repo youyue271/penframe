@@ -3,11 +3,17 @@ package executor
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -75,9 +81,13 @@ type LocalExecutor struct {
 	timeout        time.Duration
 }
 
+type HTTPExecutor struct {
+	client *http.Client
+}
+
 func NewLocalExecutor() LocalExecutor {
 	return LocalExecutor{
-		shellPath:      "sh",
+		shellPath:      defaultShellPath(),
 		powerShellPath: "powershell.exe",
 		timeout:        30 * time.Minute,
 	}
@@ -85,6 +95,112 @@ func NewLocalExecutor() LocalExecutor {
 
 func (LocalExecutor) Name() string {
 	return "local"
+}
+
+func NewHTTPExecutor() HTTPExecutor {
+	return HTTPExecutor{}
+}
+
+func (HTTPExecutor) Name() string {
+	return "http"
+}
+
+func (e HTTPExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ domain.ToolDefinition, renderedInputs map[string]any, _ string) (domain.ExecutionResult, error) {
+	targetURL := strings.TrimSpace(fmt.Sprint(renderedInputs["url"]))
+	headersFile := strings.TrimSpace(fmt.Sprint(renderedInputs["headers_file"]))
+	bodyFile := strings.TrimSpace(fmt.Sprint(renderedInputs["body_file"]))
+	if targetURL == "" {
+		return domain.ExecutionResult{}, fmt.Errorf("node %q is missing inputs.url", node.ID)
+	}
+	if headersFile == "" {
+		return domain.ExecutionResult{}, fmt.Errorf("node %q is missing inputs.headers_file", node.ID)
+	}
+	if bodyFile == "" {
+		return domain.ExecutionResult{}, fmt.Errorf("node %q is missing inputs.body_file", node.ID)
+	}
+
+	reqCtx := ctx
+	cancel := func() {}
+	if timeoutSeconds := parseTimeoutSeconds(renderedInputs["max_time"]); timeoutSeconds > 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			reqCtx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		}
+	}
+	defer cancel()
+
+	cleanDeclaredOutputFiles([]string{headersFile, bodyFile})
+	if err := ensureParentDir(headersFile); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	if err := ensureParentDir(bodyFile); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return domain.ExecutionResult{}, fmt.Errorf("build http request: %w", err)
+	}
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			Proxy:           http.ProxyFromEnvironment,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	if e.client != nil {
+		cloned := *e.client
+		if cloned.CheckRedirect == nil {
+			cloned.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		}
+		client = &cloned
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		result := domain.ExecutionResult{
+			Metadata: map[string]any{
+				"launcher":    "http",
+				"url":         targetURL,
+				"timed_out":   errors.Is(reqCtx.Err(), context.DeadlineExceeded),
+				"status_code": 0,
+			},
+		}
+		return result, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return domain.ExecutionResult{}, fmt.Errorf("read http response body: %w", err)
+	}
+	headersData := formatHTTPResponseHeaders(resp)
+
+	if err := os.WriteFile(headersFile, headersData, 0o644); err != nil {
+		return domain.ExecutionResult{}, fmt.Errorf("write headers file %s: %w", headersFile, err)
+	}
+	if err := os.WriteFile(bodyFile, bodyData, 0o644); err != nil {
+		return domain.ExecutionResult{}, fmt.Errorf("write body file %s: %w", bodyFile, err)
+	}
+
+	metadata := map[string]any{
+		"launcher":     "http",
+		"url":          targetURL,
+		"status_code":  resp.StatusCode,
+		"timed_out":    errors.Is(reqCtx.Err(), context.DeadlineExceeded),
+		"stdout_bytes": 0,
+	}
+	outputFiles := readDeclaredOutputFilesByPath([]string{headersFile, bodyFile})
+	if len(outputFiles) > 0 {
+		metadata["output_files"] = outputFiles
+	}
+	return domain.ExecutionResult{
+		Stdout:   "",
+		Metadata: metadata,
+	}, nil
 }
 
 func (e LocalExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ domain.ToolDefinition, _ map[string]any, renderedCommand string) (domain.ExecutionResult, error) {
@@ -102,6 +218,7 @@ func (e LocalExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ 
 
 	usePowerShell := shouldUsePowerShell(command)
 	powerShellCommand := command
+	shellPath := resolveShellPath(e.shellPath, node.Shell)
 	if usePowerShell {
 		resolved, err := preparePowerShellCommand(command)
 		if err != nil {
@@ -109,7 +226,8 @@ func (e LocalExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ 
 		}
 		powerShellCommand = resolved
 	}
-	cmd := e.buildCommand(execCtx, command, powerShellCommand, usePowerShell)
+	cmd := e.buildCommand(execCtx, command, powerShellCommand, shellPath, usePowerShell)
+	cmd.Env = mergeCommandEnv(os.Environ(), node.Env)
 	commandForReadback := commandForMetadata(command, powerShellCommand, usePowerShell)
 	declaredOutputFiles := extractDeclaredOutputFiles(commandForReadback)
 	cleanDeclaredOutputFiles(declaredOutputFiles)
@@ -125,6 +243,8 @@ func (e LocalExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ 
 		"launcher":     launcherName(usePowerShell),
 		"command":      command,
 		"command_exec": commandForMetadata(command, powerShellCommand, usePowerShell),
+		"shell_path":   shellPath,
+		"env_keys":     envKeys(node.Env),
 		"stderr":       strings.TrimSpace(stderr.String()),
 		"timed_out":    errors.Is(execCtx.Err(), context.DeadlineExceeded),
 		"powershell":   usePowerShell,
@@ -148,7 +268,7 @@ func (e LocalExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ 
 	return result, nil
 }
 
-func (e LocalExecutor) buildCommand(ctx context.Context, renderedCommand, powerShellCommand string, usePowerShell bool) *exec.Cmd {
+func (e LocalExecutor) buildCommand(ctx context.Context, renderedCommand, powerShellCommand, shellPath string, usePowerShell bool) *exec.Cmd {
 	if usePowerShell {
 		// Prefix command with call operator so quoted .exe paths execute correctly in PowerShell.
 		script := "& " + powerShellCommand
@@ -163,7 +283,111 @@ func (e LocalExecutor) buildCommand(ctx context.Context, renderedCommand, powerS
 			script,
 		)
 	}
-	return exec.CommandContext(ctx, e.shellPath, "-lc", renderedCommand)
+	return exec.CommandContext(ctx, shellPath, "-lc", renderedCommand)
+}
+
+func defaultShellPath() string {
+	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
+		return shell
+	}
+	return "sh"
+}
+
+func resolveShellPath(defaultPath, override string) string {
+	if selected := strings.TrimSpace(override); selected != "" {
+		return selected
+	}
+	if selected := strings.TrimSpace(defaultPath); selected != "" {
+		return selected
+	}
+	return "sh"
+}
+
+func mergeCommandEnv(base []string, overrides map[string]any) []string {
+	if len(overrides) == 0 {
+		return append([]string(nil), base...)
+	}
+
+	merged := make(map[string]string, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		merged[key] = value
+	}
+	for key, value := range overrides {
+		merged[key] = envValueString(value)
+	}
+
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+merged[key])
+	}
+	return result
+}
+
+func envKeys(values map[string]any) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func envValueString(value any) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func parseTimeoutSeconds(value any) int {
+	text := strings.TrimSpace(fmt.Sprint(value))
+	if text == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(text)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return seconds
+}
+
+func ensureParentDir(path string) error {
+	if path == "" {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create parent directory %q: %w", dir, err)
+	}
+	return nil
+}
+
+func formatHTTPResponseHeaders(resp *http.Response) []byte {
+	var out bytes.Buffer
+	fmt.Fprintf(&out, "%s %s\n", resp.Proto, resp.Status)
+	for key, values := range resp.Header {
+		for _, value := range values {
+			fmt.Fprintf(&out, "%s: %s\n", key, value)
+		}
+	}
+	out.WriteString("\n")
+	return out.Bytes()
 }
 
 func preparePowerShellCommand(command string) (string, error) {
@@ -267,7 +491,7 @@ func commandForMetadata(shellCommand, powerShellCommand string, usePowerShell bo
 	return shellCommand
 }
 
-var outputFlagPattern = regexp.MustCompile(`(?i)-(oN|oX|oG|oA|o)\s+("([^"]+)"|'([^']+)'|(\S+))`)
+var outputFlagPattern = regexp.MustCompile(`(?i)(?:^|\s)(-oN|-oX|-oG|-oA|-o|-D|--output|--dump-header)\s+("([^"]+)"|'([^']+)'|(\S+))`)
 
 func readDeclaredOutputFiles(command string) []map[string]any {
 	declared := extractDeclaredOutputFiles(command)
@@ -338,7 +562,7 @@ func extractDeclaredOutputFiles(command string) []string {
 		if path == "" {
 			continue
 		}
-		if flag == "oa" {
+		if flag == "-oa" {
 			add(path + ".nmap")
 			add(path + ".xml")
 			add(path + ".gnmap")

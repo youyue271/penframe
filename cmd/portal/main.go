@@ -5,23 +5,38 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"penframe/internal/portal"
 )
 
 func main() {
-	listenAddr := flag.String("listen", ":8080", "监听地址")
-	toolsPath := flag.String("tools", "examples/mvp/tools.yaml", "工具目录配置路径")
-	workflowPath := flag.String("workflow", "examples/mvp/workflow.yaml", "工作流配置路径")
+	listenAddr := flag.String("listen", ":8080", "listen address")
+	toolsPath := flag.String("tools", "", "tool catalog path (required)")
+	workflowPath := flag.String("workflow", "", "workflow config path (required)")
+	expURL := flag.String("exp-url", "", "Python exploit service URL (e.g. http://127.0.0.1:8787)")
 	flag.Parse()
-
-	server, err := portal.NewServer(*toolsPath, *workflowPath)
-	if err != nil {
-		log.Fatalf("启动控制台失败：%v", err)
+	if strings.TrimSpace(*toolsPath) == "" || strings.TrimSpace(*workflowPath) == "" {
+		log.Fatal("both -tools and -workflow are required")
 	}
 
-	fmt.Printf("控制台已启动：http://localhost%s\n", *listenAddr)
+	var server *portal.Server
+	var err error
+	if *expURL != "" {
+		server, err = portal.NewServerWithExpURL(*toolsPath, *workflowPath, *expURL)
+	} else {
+		server, err = portal.NewServer(*toolsPath, *workflowPath)
+	}
+	if err != nil {
+		log.Fatalf("failed to start portal: %v", err)
+	}
+
+	fmt.Printf("Portal started: http://localhost%s\n", *listenAddr)
+	fmt.Println("Vue dev server: http://localhost:5173")
+	if *expURL != "" {
+		fmt.Printf("Exp service: %s\n", *expURL)
+	}
 	if err := http.ListenAndServe(*listenAddr, server); err != nil {
-		log.Fatalf("监听失败：%v", err)
+		log.Fatalf("listen failed: %v", err)
 	}
 }

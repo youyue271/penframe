@@ -23,7 +23,7 @@
       </header>
 
       <nav class="tabs" aria-label="页面标签">
-        <button class="tab is-active" data-tab="task" type="button">训练任务</button>
+        <button class="tab is-active" data-tab="task" type="button">侦察任务</button>
         <button class="tab" data-tab="runs" type="button">运行历史</button>
         <button class="tab" data-tab="system" type="button">系统信息</button>
       </nav>
@@ -41,7 +41,7 @@
             </label>
             <button id="startTaskButton" class="btn btn-primary" type="button">开始任务</button>
           </div>
-          <p id="taskStatus" class="task-status">输入靶机地址后点击开始任务。</p>
+          <p id="taskStatus" class="task-status">输入靶机地址后点击开始任务。当前流程按主机发现、入口发现、漏洞发现、执行器占坑执行。</p>
         </section>
 
         <section class="card">
@@ -53,9 +53,9 @@
               </div>
               <div id="chainBuilderBody">
                 <div class="chain-presets">
-                  <button class="btn btn-secondary" type="button" data-chain-preset="baseline">基线预置</button>
-                  <button class="btn btn-secondary" type="button" data-chain-preset="full">全量端口预置</button>
-                  <button class="btn btn-secondary" type="button" data-chain-preset="quick-only">仅快速预置</button>
+                  <button class="btn btn-secondary" type="button" data-chain-preset="baseline">标准流程</button>
+                  <button class="btn btn-secondary" type="button" data-chain-preset="discovery-only">仅资产发现</button>
+                  <button class="btn btn-secondary" type="button" data-chain-preset="vuln-focused">发现加漏扫</button>
                 </div>
                 <div id="chainEditor" class="stack-list scroll-panel"></div>
               </div>
@@ -66,6 +66,16 @@
               <div id="chainPreview" class="stack-list scroll-panel"></div>
             </div>
           </div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <h2>发现结果总览</h2>
+              <p class="section-note">按主机、入口、漏洞、执行器占坑四个阶段归纳当前运行结果，方便后续做资产图谱和利用编排。</p>
+            </div>
+          </div>
+          <div id="reconSummary" class="stack-list"></div>
         </section>
 
         <section class="card">

@@ -2,11 +2,14 @@ package executor
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"penframe/internal/domain"
 )
@@ -31,6 +34,9 @@ func TestLocalExecutorRunsShellCommand(t *testing.T) {
 	}
 	if result.Metadata["powershell"] != false {
 		t.Fatalf("expected powershell false, got %#v", result.Metadata["powershell"])
+	}
+	if result.Metadata["shell_path"] == "" {
+		t.Fatal("expected shell_path metadata to be populated")
 	}
 }
 
@@ -73,9 +79,11 @@ func TestShouldUsePowerShell(t *testing.T) {
 }
 
 func TestExtractDeclaredOutputFiles(t *testing.T) {
-	command := `nmap -sV -oN "C:\Temp\nmap.txt" -oX /tmp/nmap.xml -oA report/all target.local`
+	command := `curl -D /tmp/headers.txt --output /tmp/body.html && nmap -sV -oN "C:\Temp\nmap.txt" -oX /tmp/nmap.xml -oA report/all target.local`
 	got := extractDeclaredOutputFiles(command)
 	want := []string{
+		`/tmp/headers.txt`,
+		`/tmp/body.html`,
 		`C:\Temp\nmap.txt`,
 		`/tmp/nmap.xml`,
 		`report/all.nmap`,
@@ -118,4 +126,156 @@ func TestCleanDeclaredOutputFilesRemovesPreviousResult(t *testing.T) {
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatalf("expected output file to be removed, got err=%v", err)
 	}
+}
+
+func TestNewLocalExecutorUsesCurrentShellEnv(t *testing.T) {
+	t.Setenv("SHELL", "/bin/custom-shell")
+
+	execImpl := NewLocalExecutor()
+	if execImpl.shellPath != "/bin/custom-shell" {
+		t.Fatalf("expected shellPath /bin/custom-shell, got %q", execImpl.shellPath)
+	}
+}
+
+func TestLocalExecutorRespectsNodeShellOverride(t *testing.T) {
+	root := t.TempDir()
+	logFile := filepath.Join(root, "shell.log")
+	wrapperPath := filepath.Join(root, "shell-wrapper.sh")
+	wrapper := "#!/bin/sh\nprintf '%s\\n' \"$0 $1 $2\" > \"" + logFile + "\"\nexec /bin/sh \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	execImpl := LocalExecutor{
+		shellPath: "/bin/sh",
+		timeout:   30 * time.Minute,
+	}
+	result, err := execImpl.Execute(
+		context.Background(),
+		domain.WorkflowNode{ID: "override-shell", Shell: wrapperPath},
+		domain.ToolDefinition{},
+		nil,
+		"printf 'hello-override'",
+	)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if got := strings.TrimSpace(result.Stdout); got != "hello-override" {
+		t.Fatalf("expected stdout hello-override, got %q", got)
+	}
+	if got := result.Metadata["shell_path"]; got != wrapperPath {
+		t.Fatalf("expected shell_path %q, got %#v", wrapperPath, got)
+	}
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, wrapperPath) || !strings.Contains(logText, "-lc") {
+		t.Fatalf("expected wrapper log to mention shell path and -lc, got %q", logText)
+	}
+}
+
+func TestLocalExecutorAppliesNodeEnvOverrides(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:13579")
+
+	execImpl := LocalExecutor{
+		shellPath: "/bin/sh",
+		timeout:   30 * time.Minute,
+	}
+	result, err := execImpl.Execute(
+		context.Background(),
+		domain.WorkflowNode{
+			ID:  "env-node",
+			Env: map[string]any{"HTTP_PROXY": "", "CUSTOM_FLAG": "hello"},
+		},
+		domain.ToolDefinition{},
+		nil,
+		"printf '%s|%s' \"$HTTP_PROXY\" \"$CUSTOM_FLAG\"",
+	)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if got := strings.TrimSpace(result.Stdout); got != "|hello" {
+		t.Fatalf("expected stdout |hello, got %q", got)
+	}
+	keys, _ := result.Metadata["env_keys"].([]string)
+	if !slices.Equal(keys, []string{"CUSTOM_FLAG", "HTTP_PROXY"}) {
+		t.Fatalf("expected env_keys to be recorded, got %#v", result.Metadata["env_keys"])
+	}
+}
+
+func TestHTTPExecutorWritesHeadersAndBody(t *testing.T) {
+	root := t.TempDir()
+	headersFile := filepath.Join(root, "headers.txt")
+	bodyFile := filepath.Join(root, "body.html")
+
+	execImpl := HTTPExecutor{
+		client: &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusTemporaryRedirect,
+					Status:     "307 Temporary Redirect",
+					Proto:      "HTTP/1.1",
+					ProtoMajor: 1,
+					ProtoMinor: 1,
+					Header: http.Header{
+						"Location":     []string{"/apps"},
+						"X-Powered-By": []string{"Next.js"},
+					},
+					Body: io.NopCloser(strings.NewReader("<title>Dify</title>")),
+				}, nil
+			}),
+		},
+	}
+	result, err := execImpl.Execute(
+		context.Background(),
+		domain.WorkflowNode{ID: "http-node"},
+		domain.ToolDefinition{},
+		map[string]any{
+			"url":          "https://demo.example:3000",
+			"headers_file": headersFile,
+			"body_file":    bodyFile,
+			"max_time":     "5",
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if got := result.Metadata["launcher"]; got != "http" {
+		t.Fatalf("expected launcher http, got %#v", got)
+	}
+	if got := result.Metadata["status_code"]; got != http.StatusTemporaryRedirect {
+		t.Fatalf("expected status code %d, got %#v", http.StatusTemporaryRedirect, got)
+	}
+
+	headersData, err := os.ReadFile(headersFile)
+	if err != nil {
+		t.Fatalf("ReadFile headers returned error: %v", err)
+	}
+	if !strings.Contains(string(headersData), "HTTP/1.1 307 Temporary Redirect") {
+		t.Fatalf("expected status line in headers, got %q", string(headersData))
+	}
+	if !strings.Contains(string(headersData), "Location: /apps") {
+		t.Fatalf("expected location header, got %q", string(headersData))
+	}
+
+	bodyData, err := os.ReadFile(bodyFile)
+	if err != nil {
+		t.Fatalf("ReadFile body returned error: %v", err)
+	}
+	if string(bodyData) != "<title>Dify</title>" {
+		t.Fatalf("unexpected body content %q", string(bodyData))
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }

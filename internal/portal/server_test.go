@@ -1,14 +1,18 @@
 package portal
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -70,6 +74,78 @@ func TestRunEndpointExecutesWorkflowAndPersistsLatestRun(t *testing.T) {
 	}
 	if latest.ID != response.Run.ID {
 		t.Fatalf("expected latest run id %q, got %q", response.Run.ID, latest.ID)
+	}
+}
+
+func TestEventsEndpointStreamsRunLifecycle(t *testing.T) {
+	server := newTestServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
+	recorder := newStreamRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.ServeHTTP(recorder, req)
+	}()
+
+	waitForRecorderContent(t, recorder, "event: portal_ready", time.Second)
+	executeRun(t, server)
+	waitForRecorderContent(t, recorder, "event: run_finished", time.Second)
+
+	cancel()
+	<-done
+
+	if got := recorder.Header().Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("expected event stream content type, got %q", got)
+	}
+
+	received, err := parseSSEEvents(strings.NewReader(recorder.BodyString()))
+	if err != nil {
+		t.Fatalf("parseSSEEvents returned error: %v", err)
+	}
+
+	filtered := make([]streamEvent, 0, len(received))
+	for _, event := range received {
+		if event.Type == "" || event.Type == eventTypePortalReady {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+
+	received = filtered
+	if len(received) != 6 {
+		t.Fatalf("expected 6 lifecycle events, got %d", len(received))
+	}
+
+	gotTypes := make([]string, 0, len(received))
+	for _, event := range received {
+		gotTypes = append(gotTypes, event.Type)
+	}
+	wantTypes := []string{
+		"run_started",
+		"node_started",
+		"node_finished",
+		"node_started",
+		"node_finished",
+		"run_finished",
+	}
+	if strings.Join(gotTypes, ",") != strings.Join(wantTypes, ",") {
+		t.Fatalf("unexpected event types: got %v want %v", gotTypes, wantTypes)
+	}
+
+	if received[0].Summary == nil || received[0].Summary.Status != "running" {
+		t.Fatalf("expected running summary in first event, got %#v", received[0].Summary)
+	}
+	if received[1].Node == nil || received[1].Node.Status != "running" {
+		t.Fatalf("expected running node in second event, got %#v", received[1].Node)
+	}
+	if received[2].Summary == nil || received[2].Summary.Stats.SucceededNodes == 0 {
+		t.Fatalf("expected node_finished event to carry updated summary stats, got %#v", received[2].Summary)
+	}
+	if received[5].Summary == nil || received[5].Summary.Status != "succeeded" {
+		t.Fatalf("expected succeeded summary in final event, got %#v", received[5].Summary)
 	}
 }
 
@@ -167,6 +243,7 @@ func TestToolFilesEndpointListsExternalFiles(t *testing.T) {
 		filepath.Join(root, "examples", "mvp", "tools.yaml"),
 		filepath.Join(root, "examples", "mvp", "workflow.yaml"),
 		externalRoot,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("newServerWithExternalRoot returned error: %v", err)
@@ -290,6 +367,15 @@ func TestRunEndpointAppliesTargetOverride(t *testing.T) {
 	if got := response.Run.Summary.Vars["target_host"]; got != "demo.example" {
 		t.Fatalf("expected target_host demo.example, got %#v", got)
 	}
+	if got := response.Run.Summary.Vars["target_hostport"]; got != "demo.example:3000" {
+		t.Fatalf("expected target_hostport demo.example:3000, got %#v", got)
+	}
+	if got := response.Run.Summary.Vars["target_origin"]; got != "https://demo.example:3000" {
+		t.Fatalf("expected target_origin https://demo.example:3000, got %#v", got)
+	}
+	if got := response.Run.Summary.Vars["target_port"]; got != "3000" {
+		t.Fatalf("expected target_port 3000, got %#v", got)
+	}
 	if got := response.Run.Summary.Vars["target_url"]; got != "https://demo.example:3000/path" {
 		t.Fatalf("expected target_url override, got %#v", got)
 	}
@@ -379,4 +465,81 @@ func copyDir(t *testing.T, src, dst string) {
 	}); err != nil {
 		t.Fatalf("copyDir returned error: %v", err)
 	}
+}
+
+func parseSSEEvents(reader io.Reader) ([]streamEvent, error) {
+	scanner := bufio.NewScanner(reader)
+	currentType := ""
+	var events []streamEvent
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			currentType = strings.TrimSpace(strings.TrimPrefix(line, "event: "))
+		case strings.HasPrefix(line, "data: "):
+			var event streamEvent
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+				return nil, err
+			}
+			if event.Type == "" {
+				event.Type = currentType
+			}
+			events = append(events, event)
+			currentType = ""
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func waitForRecorderContent(t *testing.T, recorder *streamRecorder, needle string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(recorder.BodyString(), needle) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %q in recorder body", needle)
+}
+
+type streamRecorder struct {
+	mu     sync.Mutex
+	header http.Header
+	body   bytes.Buffer
+	code   int
+}
+
+func newStreamRecorder() *streamRecorder {
+	return &streamRecorder{
+		header: make(http.Header),
+		code:   http.StatusOK,
+	}
+}
+
+func (r *streamRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *streamRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.code = statusCode
+}
+
+func (r *streamRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.Write(data)
+}
+
+func (r *streamRecorder) Flush() {}
+
+func (r *streamRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.String()
 }

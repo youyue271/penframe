@@ -33,10 +33,14 @@ func (e *Engine) Parse(ruleSet domain.ParserRuleSet, stdout string, assets map[s
 				if name == "" {
 					continue
 				}
-				record[name] = value
+				record[name] = strings.TrimSpace(value)
 			}
-			if err := saveRecord(assets, rule.SaveTo, record); err != nil {
+			stored, err := saveRecord(assets, rule.SaveTo, record)
+			if err != nil {
 				return nil, fmt.Errorf("save parser rule %q output: %w", rule.Name, err)
+			}
+			if !stored {
+				continue
 			}
 			records = append(records, domain.ParsedRecord{
 				Rule:   rule.Name,
@@ -48,31 +52,34 @@ func (e *Engine) Parse(ruleSet domain.ParserRuleSet, stdout string, assets map[s
 	return records, nil
 }
 
-func saveRecord(root map[string]any, path string, record map[string]string) error {
+func saveRecord(root map[string]any, path string, record map[string]string) (bool, error) {
 	path = strings.TrimSpace(path)
 	path = strings.TrimPrefix(path, "assets.")
 	if path == "" {
-		return fmt.Errorf("empty save_to path")
+		return false, fmt.Errorf("empty save_to path")
 	}
 
 	segments := strings.Split(path, ".")
 	cursor := root
 	for idx, segment := range segments {
 		if segment == "" {
-			return fmt.Errorf("invalid segment in save_to path %q", path)
+			return false, fmt.Errorf("invalid segment in save_to path %q", path)
 		}
 		if idx == len(segments)-1 {
 			existing, ok := cursor[segment]
 			if !ok {
 				cursor[segment] = []any{record}
-				return nil
+				return true, nil
 			}
 			list, ok := existing.([]any)
 			if !ok {
-				return fmt.Errorf("path %q already exists with incompatible type %T", path, existing)
+				return false, fmt.Errorf("path %q already exists with incompatible type %T", path, existing)
+			}
+			if hasRecord(list, record) {
+				return false, nil
 			}
 			cursor[segment] = append(list, record)
-			return nil
+			return true, nil
 		}
 
 		next, ok := cursor[segment]
@@ -84,9 +91,34 @@ func saveRecord(root map[string]any, path string, record map[string]string) erro
 		}
 		child, ok := next.(map[string]any)
 		if !ok {
-			return fmt.Errorf("path %q already exists with incompatible type %T", strings.Join(segments[:idx+1], "."), next)
+			return false, fmt.Errorf("path %q already exists with incompatible type %T", strings.Join(segments[:idx+1], "."), next)
 		}
 		cursor = child
 	}
-	return nil
+	return false, nil
+}
+
+func hasRecord(list []any, candidate map[string]string) bool {
+	for _, item := range list {
+		existing, ok := item.(map[string]string)
+		if !ok {
+			continue
+		}
+		if sameRecord(existing, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameRecord(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, leftValue := range left {
+		if rightValue, ok := right[key]; !ok || rightValue != leftValue {
+			return false
+		}
+	}
+	return true
 }

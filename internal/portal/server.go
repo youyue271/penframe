@@ -2,14 +2,12 @@ package portal
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,17 +16,16 @@ import (
 	"sync"
 	"time"
 
+	"penframe/internal/asset"
 	"penframe/internal/config"
 	"penframe/internal/domain"
 	"penframe/internal/executor"
 	"penframe/internal/parser"
 	"penframe/internal/storage"
+	"penframe/internal/targeting"
 	"penframe/internal/tooling"
 	"penframe/internal/workflow"
 )
-
-//go:embed ui/*
-var uiFiles embed.FS
 
 const defaultExternalToolsRoot = "/mnt/h/tools/Penetration/tools"
 const defaultToolFileMaxDepth = 4
@@ -47,7 +44,11 @@ type Server struct {
 	workflow     domain.Workflow
 	runner       *workflow.Runner
 	store        *storage.MemoryStore
+	events       *eventBroker
 	mux          *http.ServeMux
+	assets       *asset.Store
+	expExecutor  *executor.ExpExecutor
+	handler      http.Handler
 }
 
 type stateResponse struct {
@@ -104,10 +105,15 @@ type toolFilesResponse struct {
 }
 
 func NewServer(toolsPath, workflowPath string) (*Server, error) {
-	return newServerWithExternalRoot(toolsPath, workflowPath, defaultExternalToolsRoot)
+	return newServerWithExternalRoot(toolsPath, workflowPath, defaultExternalToolsRoot, "")
 }
 
-func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot string) (*Server, error) {
+// NewServerWithExpURL creates a server with the exp executor pointing to the given URL.
+func NewServerWithExpURL(toolsPath, workflowPath, expURL string) (*Server, error) {
+	return newServerWithExternalRoot(toolsPath, workflowPath, defaultExternalToolsRoot, expURL)
+}
+
+func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL string) (*Server, error) {
 	tools, wf, runner, err := loadRuntime(toolsPath, workflowPath)
 	if err != nil {
 		return nil, err
@@ -121,32 +127,61 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot string) (*S
 		workflow:     wf,
 		runner:       runner,
 		store:        storage.NewMemoryStore(),
+		events:       newEventBroker(),
 		mux:          http.NewServeMux(),
+		assets:       asset.NewStore(),
 	}
+
+	if expURL != "" {
+		exp := executor.NewExpExecutor(expURL)
+		server.expExecutor = &exp
+	}
+
 	if err := server.routes(); err != nil {
 		return nil, err
 	}
+	server.handler = corsMiddleware(server.mux)
 	return server, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *Server) routes() error {
-	uiRoot, err := fs.Sub(uiFiles, "ui")
-	if err != nil {
-		return fmt.Errorf("加载内嵌界面资源失败：%w", err)
-	}
-
+	// Existing API routes.
 	s.mux.HandleFunc("/api/state", s.handleState)
+	s.mux.HandleFunc("/api/events", s.handleEvents)
 	s.mux.HandleFunc("/api/run", s.handleRun)
 	s.mux.HandleFunc("/api/reload", s.handleReload)
 	s.mux.HandleFunc("/api/runs", s.handleRuns)
 	s.mux.HandleFunc("/api/runs/", s.handleRunByID)
 	s.mux.HandleFunc("/api/tool-files", s.handleToolFiles)
+
+	// New API routes for asset graph, scan control, and exploit.
+	s.mux.HandleFunc("/api/assets", s.handleAssets)
+	s.mux.HandleFunc("/api/assets/", s.handleAssetsByRun)
+	s.mux.HandleFunc("/api/scan", s.handleScan)
+	s.mux.HandleFunc("/api/scan/", s.handleScanAction)
+	s.mux.HandleFunc("/api/tasks", s.handleTasks)
+	s.mux.HandleFunc("/api/exploit", s.handleExploit)
+	s.mux.HandleFunc("/api/exploits", s.handleExploitsList)
+	s.mux.HandleFunc("/api/logs", s.handleLogs)
+
 	s.mux.HandleFunc("/healthz", s.handleHealth)
-	s.mux.Handle("/", http.FileServer(http.FS(uiRoot)))
+
+	// Serve a minimal JSON fallback for root (Vue dev server handles the real UI).
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			writeJSON(w, http.StatusOK, map[string]string{
+				"service": "penframe-portal",
+				"status":  "ok",
+				"ui":      "use Vue dev server at http://localhost:5173",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	})
 	return nil
 }
 
@@ -172,13 +207,20 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), resolveRunTimeout(request.TimeoutSeconds))
 	defer cancel()
+	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
+	observedCtx := workflow.WithEventObserver(ctx, workflow.EventObserverFunc(func(event workflow.Event) {
+		if event.Summary != nil {
+			s.store.Save(runID, *event.Summary)
+		}
+		s.events.Publish(newStreamEvent(runID, event))
+	}))
 
 	_, _, _, wfBase, runner := s.snapshotRuntime()
 	wf := applyRunRequest(wfBase, request)
-	summary, runErr := runner.Run(ctx, wf)
+	summary, runErr := runner.Run(observedCtx, wf)
 
 	run := storage.StoredRun{
-		ID:      fmt.Sprintf("run-%d", time.Now().UTC().UnixNano()),
+		ID:      runID,
 		Summary: summary,
 	}
 	s.store.Save(run.ID, run.Summary)
@@ -187,6 +229,55 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		response.Error = runErr.Error()
 	}
 	writeJSON(w, http.StatusCreated, response)
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("当前响应不支持事件流"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	events, unsubscribe := s.events.Subscribe()
+	defer unsubscribe()
+
+	if err := writeSSE(w, readyEvent()); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(20 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := writeSSE(w, event); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 func resolveRunTimeout(timeoutSeconds int) time.Duration {
@@ -230,11 +321,10 @@ func applyRunRequest(base domain.Workflow, request runRequest) domain.Workflow {
 
 	target := strings.TrimSpace(request.Target)
 	if target == "" {
+		targeting.Ensure(wf.GlobalVars)
 		return wf
 	}
-	wf.GlobalVars["target"] = target
-	wf.GlobalVars["target_host"] = extractTargetHost(target)
-	wf.GlobalVars["target_url"] = normalizeTargetURL(target)
+	targeting.ApplyOverride(wf.GlobalVars, target)
 	return wf
 }
 
@@ -250,32 +340,11 @@ func cloneVars(vars map[string]any) map[string]any {
 }
 
 func extractTargetHost(raw string) string {
-	candidate := strings.TrimSpace(raw)
-	if candidate == "" {
-		return ""
-	}
-	if strings.Contains(candidate, "://") {
-		parsed, err := url.Parse(candidate)
-		if err == nil && parsed.Hostname() != "" {
-			return parsed.Hostname()
-		}
-	}
-	parsed, err := url.Parse("http://" + candidate)
-	if err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	return candidate
+	return targeting.Parse(raw).Host
 }
 
 func normalizeTargetURL(raw string) string {
-	candidate := strings.TrimSpace(raw)
-	if candidate == "" {
-		return ""
-	}
-	if strings.Contains(candidate, "://") {
-		return candidate
-	}
-	return "https://" + candidate
+	return targeting.NormalizeURL(raw)
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
@@ -415,16 +484,21 @@ func (s *Server) externalToolsRoot() string {
 func loadRuntime(toolsPath, workflowPath string) (map[string]domain.ToolDefinition, domain.Workflow, *workflow.Runner, error) {
 	tools, err := config.LoadToolCatalog(toolsPath)
 	if err != nil {
-		return nil, domain.Workflow{}, nil, fmt.Errorf("加载工具目录失败：%w", err)
+		return nil, domain.Workflow{}, nil, fmt.Errorf("load tools: %w", err)
 	}
 	wf, err := config.LoadWorkflow(workflowPath)
 	if err != nil {
-		return nil, domain.Workflow{}, nil, fmt.Errorf("加载工作流失败：%w", err)
+		return nil, domain.Workflow{}, nil, fmt.Errorf("load workflow: %w", err)
 	}
 
 	runner := workflow.NewRunner(
 		tooling.NewRegistry(tools),
-		executor.NewRegistry(executor.NewMockExecutor(), executor.NewLocalExecutor()),
+		executor.NewRegistry(
+			executor.NewMockExecutor(),
+			executor.NewLocalExecutor(),
+			executor.NewHTTPExecutor(),
+			executor.NewExpExecutor(""),
+		),
 		parser.NewEngine(),
 		workflow.NewMiniExprEvaluator(),
 	)
