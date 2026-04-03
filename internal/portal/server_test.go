@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"penframe/internal/domain"
 )
 
 func TestStateEndpointReturnsWorkflowAndTools(t *testing.T) {
@@ -378,6 +380,142 @@ func TestRunEndpointAppliesTargetOverride(t *testing.T) {
 	}
 	if got := response.Run.Summary.Vars["target_url"]; got != "https://demo.example:3000/path" {
 		t.Fatalf("expected target_url override, got %#v", got)
+	}
+}
+
+func TestScanEndpointReturnsInitialRunningRun(t *testing.T) {
+	server := newTestServer(t)
+	body := bytes.NewBufferString(`{"target":"192.0.2.10","strategy":"custom","phases":["port_scan","vuln_scan"]}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/scan", body)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d", recorder.Code)
+	}
+
+	var response scanResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal scan response: %v", err)
+	}
+	if response.RunID == "" {
+		t.Fatal("expected run id to be populated")
+	}
+	if response.Run == nil {
+		t.Fatal("expected initial run payload in scan response")
+	}
+	if response.Run.ID != response.RunID {
+		t.Fatalf("expected run payload id %q, got %q", response.RunID, response.Run.ID)
+	}
+	if response.Run.Summary.Status != domain.RunStatusRunning {
+		t.Fatalf("expected initial run status %q, got %q", domain.RunStatusRunning, response.Run.Summary.Status)
+	}
+	if response.Run.Summary.Stats.TotalNodes == 0 {
+		t.Fatal("expected initial run summary to carry workflow node count")
+	}
+	if len(response.Tasks) == 0 {
+		t.Fatal("expected initial tasks to be returned")
+	}
+	if response.Tasks[0].NodeID == "" {
+		t.Fatal("expected workflow-backed tasks to include node_id")
+	}
+
+	storedRun, ok := server.store.GetStoredRun(response.RunID)
+	if !ok {
+		t.Fatal("expected initial run to be saved")
+	}
+	if storedRun.Summary.Status != domain.RunStatusRunning && storedRun.Summary.Status != domain.RunStatusSucceeded {
+		t.Fatalf("expected stored run to exist with running/succeeded status, got %q", storedRun.Summary.Status)
+	}
+}
+
+func TestAssetsEndpointProjectsStoredRunHierarchy(t *testing.T) {
+	server := newTestServer(t)
+	runID := executeRun(t, server).Run.ID
+
+	req := httptest.NewRequest(http.MethodGet, "/api/assets/"+runID, nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response struct {
+		RunID   string             `json:"run_id"`
+		Summary map[string]int     `json:"summary"`
+		Hosts   []domain.AssetHost `json:"hosts"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal assets response: %v", err)
+	}
+	if response.RunID != runID {
+		t.Fatalf("expected run id %q, got %q", runID, response.RunID)
+	}
+	if response.Summary["hosts"] < 2 {
+		t.Fatalf("expected projected hosts, got %#v", response.Summary)
+	}
+	if response.Summary["ports"] < 2 {
+		t.Fatalf("expected projected ports, got %#v", response.Summary)
+	}
+	if len(response.Hosts) == 0 {
+		t.Fatal("expected hosts in projected asset graph")
+	}
+	foundPort := false
+	for _, host := range response.Hosts {
+		if len(host.Ports) > 0 {
+			foundPort = true
+			break
+		}
+	}
+	if !foundPort {
+		t.Fatal("expected at least one host to contain ports")
+	}
+}
+
+func TestTasksEndpointCanFilterByRunID(t *testing.T) {
+	server := newTestServer(t)
+
+	firstBody := bytes.NewBufferString(`{"target":"192.0.2.11","strategy":"discovery"}`)
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/scan", firstBody)
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRecorder := httptest.NewRecorder()
+	server.ServeHTTP(firstRecorder, firstReq)
+
+	var firstResponse scanResponse
+	if err := json.Unmarshal(firstRecorder.Body.Bytes(), &firstResponse); err != nil {
+		t.Fatalf("unmarshal first scan response: %v", err)
+	}
+
+	secondBody := bytes.NewBufferString(`{"target":"192.0.2.12","strategy":"recon"}`)
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/scan", secondBody)
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRecorder := httptest.NewRecorder()
+	server.ServeHTTP(secondRecorder, secondReq)
+
+	filterReq := httptest.NewRequest(http.MethodGet, "/api/tasks?run_id="+firstResponse.RunID, nil)
+	filterRecorder := httptest.NewRecorder()
+	server.ServeHTTP(filterRecorder, filterReq)
+
+	if filterRecorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", filterRecorder.Code)
+	}
+
+	var payload struct {
+		Tasks []*domain.ScanTask `json:"tasks"`
+	}
+	if err := json.Unmarshal(filterRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal filtered tasks response: %v", err)
+	}
+	if len(payload.Tasks) != len(firstResponse.Tasks) {
+		t.Fatalf("expected %d tasks for the first run, got %d", len(firstResponse.Tasks), len(payload.Tasks))
+	}
+	for _, task := range payload.Tasks {
+		if task.ParentID != firstResponse.RunID {
+			t.Fatalf("expected task parent %q, got %q", firstResponse.RunID, task.ParentID)
+		}
 	}
 }
 

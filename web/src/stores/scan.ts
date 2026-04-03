@@ -12,6 +12,10 @@ export const useScanStore = defineStore('scan', () => {
   const scanning = ref(false)
   const error = ref('')
 
+  function upsertRun(run: StoredRun) {
+    runs.value = [run, ...runs.value.filter((item) => item.id !== run.id)]
+  }
+
   async function scan(req: ScanRequest) {
     scanning.value = true
     error.value = ''
@@ -19,7 +23,12 @@ export const useScanStore = defineStore('scan', () => {
       const resp = await startScan(req)
       currentRunId.value = resp.run_id
       tasks.value = resp.tasks
-      await loadRun(resp.run_id)
+      if (resp.run) {
+        currentRun.value = resp.run
+        upsertRun(resp.run)
+      } else {
+        await loadRun(resp.run_id)
+      }
       return resp
     } catch (e: any) {
       error.value = e.message
@@ -29,9 +38,9 @@ export const useScanStore = defineStore('scan', () => {
     }
   }
 
-  async function loadTasks() {
+  async function loadTasks(runId = currentRunId.value) {
     try {
-      const resp = await fetchTasks()
+      const resp = await fetchTasks(runId)
       tasks.value = resp.tasks
     } catch (e: any) {
       error.value = e.message
@@ -53,6 +62,7 @@ export const useScanStore = defineStore('scan', () => {
       currentRunId.value = id
       const resp = await fetchRunById(id)
       currentRun.value = resp.run
+      upsertRun(resp.run)
       return resp.run
     } catch (e: any) {
       error.value = e.message

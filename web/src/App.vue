@@ -12,12 +12,12 @@
         active-text-color="#409eff"
       >
         <el-menu-item index="/">
+          <el-icon><Aim /></el-icon>
+          <span>Target</span>
+        </el-menu-item>
+        <el-menu-item index="/dashboard">
           <el-icon><Monitor /></el-icon>
           <span>Dashboard</span>
-        </el-menu-item>
-        <el-menu-item index="/target">
-          <el-icon><Aim /></el-icon>
-          <span>Target Workspace</span>
         </el-menu-item>
         <el-menu-item index="/assets">
           <el-icon><Share /></el-icon>

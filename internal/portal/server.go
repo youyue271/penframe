@@ -161,6 +161,9 @@ func (s *Server) routes() error {
 	// New API routes for asset graph, scan control, and exploit.
 	s.mux.HandleFunc("/api/assets", s.handleAssets)
 	s.mux.HandleFunc("/api/assets/", s.handleAssetsByRun)
+	s.mux.HandleFunc("/api/hosts", s.handleListHosts)
+	s.mux.HandleFunc("/api/hosts/", s.handleHostPorts)
+	s.mux.HandleFunc("/api/ports/", s.handlePortDetails)
 	s.mux.HandleFunc("/api/scan", s.handleScan)
 	s.mux.HandleFunc("/api/scan/", s.handleScanAction)
 	s.mux.HandleFunc("/api/tasks", s.handleTasks)

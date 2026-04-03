@@ -17,8 +17,8 @@ import LogViewer from './views/LogViewer.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'dashboard', component: Dashboard },
-    { path: '/target', name: 'target', component: TargetWorkspace },
+    { path: '/', name: 'target', component: TargetWorkspace },
+    { path: '/dashboard', name: 'dashboard', component: Dashboard },
     { path: '/assets', name: 'assets', component: AssetGraph },
     { path: '/scan', name: 'scan', component: ScanControl },
     { path: '/exploit', name: 'exploit', component: ExploitPanel },

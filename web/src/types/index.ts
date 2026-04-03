@@ -63,12 +63,15 @@ export interface AssetGraphResponse {
   run_id: string
   target: string
   summary: { hosts: number; ports: number; paths: number; vulns: number }
+  hosts: AssetHost[]
   elements: CytoscapeElement[]
 }
 
 export interface ScanRequest {
   target: string
   strategy?: string
+  phases?: string[]
+  tools?: Record<string, string>
   vars?: Record<string, any>
   timeout_seconds?: number
 }
@@ -77,7 +80,58 @@ export interface ScanResponse {
   run_id: string
   tasks: ScanTask[]
   input: any
+  run?: StoredRun
   error?: string
+}
+
+export interface ToolVariableDefinition {
+  name: string
+  required: boolean
+  default?: string
+  description?: string
+}
+
+export interface ToolDefinition {
+  name: string
+  category: string
+  description?: string
+  command_template?: string
+  parser?: string
+  variables?: ToolVariableDefinition[]
+  private_variables?: ToolVariableDefinition[]
+  metadata?: Record<string, any>
+}
+
+export interface WorkflowNodeDefinition {
+  id: string
+  tool: string
+  executor: string
+  shell?: string
+  env?: Record<string, any>
+  timeout_seconds?: number
+  continue_on_error?: boolean
+  inputs?: Record<string, any>
+  mock?: Record<string, any>
+}
+
+export interface WorkflowDefinition {
+  name: string
+  description?: string
+  global_vars?: Record<string, any>
+  nodes: WorkflowNodeDefinition[]
+  edges?: Array<{ from: string; to: string; condition?: string }>
+}
+
+export interface PortalStateResponse {
+  workflow: WorkflowDefinition
+  tools: ToolDefinition[]
+  latest_run?: StoredRun
+  recent_runs: StoredRun[]
+  workflow_meta: {
+    node_count: number
+    edge_count: number
+    entry_nodes: string[]
+  }
 }
 
 export interface ExploitInfo {

@@ -73,6 +73,22 @@ func (s *Store) UpdateTaskStatus(taskID, status, errMsg string) {
 	}
 }
 
+// UpdateTaskByRunNode updates a task matched by run ID and workflow node ID.
+func (s *Store) UpdateTaskByRunNode(runID, nodeID, status, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tasks {
+		if t.ParentID != runID || t.NodeID != nodeID {
+			continue
+		}
+		t.Status = status
+		if errMsg != "" {
+			t.Error = errMsg
+		}
+		return
+	}
+}
+
 // ListTasks returns all scan tasks.
 func (s *Store) ListTasks() []*domain.ScanTask {
 	s.mu.RLock()

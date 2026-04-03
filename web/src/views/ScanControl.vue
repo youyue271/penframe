@@ -94,6 +94,12 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="Command" min-width="280">
+          <template #default="{ row }">
+            <code v-if="row.rendered_command" class="cmd-text">{{ row.rendered_command }}</code>
+            <span v-else class="cmd-na">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="duration_millis" label="Duration" width="100">
           <template #default="{ row }">
             {{ (row.duration_millis / 1000).toFixed(1) }}s
@@ -241,7 +247,7 @@ async function refreshCurrentRun() {
   if (!scanStore.currentRunId) return
   try {
     await scanStore.loadRun(scanStore.currentRunId)
-    await scanStore.loadTasks()
+    await scanStore.loadTasks(scanStore.currentRunId)
   } catch {
     // store already records the error
   }
@@ -284,7 +290,7 @@ onMounted(() => {
   })()
   unsubscribe = sseStore.onEvent((event) => {
     if (!scanStore.currentRunId || event.run_id !== scanStore.currentRunId) return
-    if (event.type === 'node_started' || event.type === 'node_finished' || event.type === 'run_finished' || event.type === 'scan_error') {
+    if (event.type === 'run_started' || event.type === 'node_started' || event.type === 'node_finished' || event.type === 'run_finished' || event.type === 'scan_error') {
       void refreshCurrentRun()
     }
   })
@@ -326,5 +332,17 @@ onBeforeUnmount(() => {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.cmd-text {
+  font-family: 'Consolas', 'Fira Code', monospace;
+  font-size: 12px;
+  color: #a0cfff;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.cmd-na {
+  color: #606266;
 }
 </style>

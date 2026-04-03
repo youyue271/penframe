@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"penframe/internal/domain"
@@ -14,18 +15,20 @@ import (
 )
 
 type scanRequest struct {
-	Target         string         `json:"target"`
-	Strategy       string         `json:"strategy"` // full/discovery/recon
-	Vars           map[string]any `json:"vars,omitempty"`
-	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
+	Target         string            `json:"target"`
+	Strategy       string            `json:"strategy"` // full/discovery/recon/custom
+	Phases         []string          `json:"phases,omitempty"`
+	Tools          map[string]string `json:"tools,omitempty"`
+	Vars           map[string]any    `json:"vars,omitempty"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
 }
 
 type scanResponse struct {
-	RunID  string             `json:"run_id"`
-	Tasks  []*domain.ScanTask `json:"tasks"`
-	Input  scanner.ParsedInput `json:"input"`
-	Run    *storage.StoredRun  `json:"run,omitempty"`
-	Error  string             `json:"error,omitempty"`
+	RunID string              `json:"run_id"`
+	Tasks []*domain.ScanTask  `json:"tasks"`
+	Input scanner.ParsedInput `json:"input"`
+	Run   *storage.StoredRun  `json:"run,omitempty"`
+	Error string              `json:"error,omitempty"`
 }
 
 func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
@@ -51,25 +54,19 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	// Classify input.
 	input := scanner.ClassifyInput(req.Target)
 
-	// Choose strategy.
-	strat := scanner.FullStrategy()
-	switch req.Strategy {
-	case "discovery":
-		strat = scanner.DiscoveryOnlyStrategy()
-	case "recon":
-		strat = scanner.ReconStrategy()
-	}
-
 	runID := fmt.Sprintf("scan-%d", time.Now().UTC().UnixNano())
+	initialRun := s.newInitialScanRun(runID, req)
 
 	// Generate initial tasks.
-	tasks := scanner.GenerateInitialTasks(input, strat, runID)
+	tasks := s.newInitialScanTasks(runID, req)
 	for _, t := range tasks {
 		s.assets.AddTask(t)
 	}
 
 	// Create asset graph for this run.
 	s.assets.GetOrCreate(runID, req.Target)
+
+	s.store.Save(initialRun.ID, initialRun.Summary)
 
 	// Also run the existing workflow for backward compatibility.
 	go s.executeScanWorkflow(runID, req)
@@ -78,6 +75,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		RunID: runID,
 		Tasks: tasks,
 		Input: input,
+		Run:   &initialRun,
 	})
 }
 
@@ -141,21 +139,23 @@ func (s *Server) executeScanWorkflow(runID string, req scanRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), resolveRunTimeout(req.TimeoutSeconds))
 	defer cancel()
 
-	runMarkedRunning := false
 	observedCtx := workflow.WithEventObserver(ctx, workflow.EventObserverFunc(func(event workflow.Event) {
 		if event.Summary != nil {
 			s.store.Save(runID, *event.Summary)
 		}
 
 		switch event.Type {
-		case workflow.EventRunStarted, workflow.EventNodeStarted:
-			if !runMarkedRunning {
-				s.assets.UpdatePendingTasksByRun(runID, domain.ScanTaskRunning)
-				runMarkedRunning = true
+		case workflow.EventNodeStarted:
+			if event.Node != nil {
+				s.assets.UpdateTaskByRunNode(runID, event.Node.NodeID, domain.ScanTaskRunning, "")
+			}
+		case workflow.EventNodeFinished:
+			if event.Node != nil {
+				s.assets.UpdateTaskByRunNode(runID, event.Node.NodeID, mapNodeStatusToTaskStatus(event.Node.Status), event.Node.Error)
 			}
 		case workflow.EventRunFinished:
 			if event.Summary != nil && event.Summary.Status == domain.RunStatusSucceeded {
-				s.assets.FinalizeTasksByRun(runID, domain.ScanTaskDone, "")
+				s.assets.FinalizeTasksByRun(runID, domain.ScanTaskSkipped, "")
 			} else {
 				errMsg := "scan workflow failed"
 				if event.Summary != nil && event.Summary.Error != "" {
@@ -199,6 +199,55 @@ func (s *Server) executeScanWorkflow(runID string, req scanRequest) {
 	}
 }
 
+func buildCustomStrategy(phases []string) scanner.Strategy {
+	strat := scanner.Strategy{
+		HostDiscovery: false,
+		PortScan:      false,
+		PathScan:      false,
+		VulnScan:      false,
+		Exploit:       false,
+	}
+	for _, phase := range phases {
+		switch phase {
+		case "host_discovery":
+			strat.HostDiscovery = true
+		case "port_scan":
+			strat.PortScan = true
+		case "path_scan":
+			strat.PathScan = true
+		case "vuln_scan":
+			strat.VulnScan = true
+		case "exploit":
+			strat.Exploit = true
+		}
+	}
+	return strat
+}
+
+func (s *Server) newInitialScanRun(runID string, req scanRequest) storage.StoredRun {
+	_, _, _, wfBase, _ := s.snapshotRuntime()
+	wf := applyRunRequest(wfBase, runRequest{
+		Target: req.Target,
+		Vars:   req.Vars,
+	})
+	startedAt := time.Now().UTC()
+	return storage.StoredRun{
+		ID: runID,
+		Summary: domain.RunSummary{
+			Workflow:       wf.Name,
+			Status:         domain.RunStatusRunning,
+			StartedAt:      startedAt,
+			Vars:           cloneVars(wf.GlobalVars),
+			Assets:         map[string]any{},
+			NodeResults:    map[string]domain.NodeRunResult{},
+			ExecutionOrder: []string{},
+			Stats: domain.RunStats{
+				TotalNodes: len(wf.Nodes),
+			},
+		},
+	}
+}
+
 func splitFirst(s, sep string) []string {
 	idx := 0
 	for i := range s {
@@ -208,4 +257,66 @@ func splitFirst(s, sep string) []string {
 		idx++
 	}
 	return []string{s}
+}
+
+func (s *Server) newInitialScanTasks(runID string, req scanRequest) []*domain.ScanTask {
+	_, _, tools, wfBase, _ := s.snapshotRuntime()
+	wf := applyRunRequest(wfBase, runRequest{
+		Target: req.Target,
+		Vars:   req.Vars,
+	})
+	tasks := buildWorkflowTasks(runID, strings.TrimSpace(req.Target), wf, tools)
+	if len(tasks) > 0 {
+		return tasks
+	}
+
+	input := scanner.ClassifyInput(req.Target)
+	strat := scanner.FullStrategy()
+	switch req.Strategy {
+	case "discovery":
+		strat = scanner.DiscoveryOnlyStrategy()
+	case "recon":
+		strat = scanner.ReconStrategy()
+	case "custom":
+		strat = buildCustomStrategy(req.Phases)
+	}
+	return scanner.GenerateInitialTasks(input, strat, runID)
+}
+
+func buildWorkflowTasks(runID, target string, wf domain.Workflow, tools map[string]domain.ToolDefinition) []*domain.ScanTask {
+	tasks := make([]*domain.ScanTask, 0, len(wf.Nodes))
+	seqBase := time.Now().UTC().UnixNano()
+	for idx, node := range wf.Nodes {
+		if tool, ok := tools[node.Tool]; ok && tool.Category == "orchestration" {
+			continue
+		}
+		taskTarget := strings.TrimSpace(target)
+		if taskTarget == "" {
+			taskTarget = node.ID
+		}
+		tasks = append(tasks, &domain.ScanTask{
+			ID:       fmt.Sprintf("task-node-%d-%d", seqBase, idx),
+			Type:     node.Tool,
+			Target:   taskTarget,
+			Status:   domain.ScanTaskPending,
+			ParentID: runID,
+			NodeID:   node.ID,
+		})
+	}
+	return tasks
+}
+
+func mapNodeStatusToTaskStatus(status string) string {
+	switch status {
+	case domain.NodeStatusSucceeded:
+		return domain.ScanTaskDone
+	case domain.NodeStatusFailed:
+		return domain.ScanTaskFailed
+	case domain.NodeStatusSkipped:
+		return domain.ScanTaskSkipped
+	case domain.NodeStatusRunning:
+		return domain.ScanTaskRunning
+	default:
+		return domain.ScanTaskPending
+	}
 }

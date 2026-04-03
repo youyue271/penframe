@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AssetGraphResponse, CytoscapeElement } from '@/types'
-import { fetchAssets } from '@/api/assets'
+import type { AssetGraphResponse, AssetHost, CytoscapeElement } from '@/types'
+import { fetchAssets, fetchAssetsByRun } from '@/api/assets'
 
 export const useAssetStore = defineStore('asset', () => {
   const graph = ref<AssetGraphResponse | null>(null)
@@ -16,11 +16,23 @@ export const useAssetStore = defineStore('asset', () => {
     return graph.value?.summary || { hosts: 0, ports: 0, paths: 0, vulns: 0 }
   })
 
-  async function load() {
+  const hosts = computed<AssetHost[]>(() => {
+    return graph.value?.hosts || []
+  })
+
+  const target = computed(() => {
+    return graph.value?.target || ''
+  })
+
+  const runId = computed(() => {
+    return graph.value?.run_id || ''
+  })
+
+  async function load(runId?: string) {
     loading.value = true
     error.value = ''
     try {
-      graph.value = await fetchAssets()
+      graph.value = runId ? await fetchAssetsByRun(runId) : await fetchAssets()
     } catch (e: any) {
       error.value = e.message
     } finally {
@@ -28,9 +40,14 @@ export const useAssetStore = defineStore('asset', () => {
     }
   }
 
+  function clear() {
+    graph.value = null
+    error.value = ''
+  }
+
   function updateFromSSE(data: AssetGraphResponse) {
     graph.value = data
   }
 
-  return { graph, loading, error, elements, summary, load, updateFromSSE }
+  return { graph, loading, error, elements, summary, hosts, target, runId, load, clear, updateFromSSE }
 })
