@@ -21,6 +21,7 @@ import (
 	"penframe/internal/domain"
 	"penframe/internal/executor"
 	"penframe/internal/parser"
+	"penframe/internal/project"
 	"penframe/internal/storage"
 	"penframe/internal/targeting"
 	"penframe/internal/tooling"
@@ -47,6 +48,7 @@ type Server struct {
 	events       *eventBroker
 	mux          *http.ServeMux
 	assets       *asset.Store
+	projects     *project.Store
 	expExecutor  *executor.ExpExecutor
 	handler      http.Handler
 }
@@ -119,6 +121,11 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL str
 		return nil, err
 	}
 
+	projectStore, err := project.NewStore(filepath.Join(".penframe"))
+	if err != nil {
+		return nil, err
+	}
+
 	server := &Server{
 		toolsPath:    toolsPath,
 		workflowPath: workflowPath,
@@ -130,6 +137,7 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL str
 		events:       newEventBroker(),
 		mux:          http.NewServeMux(),
 		assets:       asset.NewStore(),
+		projects:     projectStore,
 	}
 
 	if expURL != "" {
@@ -167,6 +175,8 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("/api/scan", s.handleScan)
 	s.mux.HandleFunc("/api/scan/", s.handleScanAction)
 	s.mux.HandleFunc("/api/tasks", s.handleTasks)
+	s.mux.HandleFunc("/api/projects", s.handleProjects)
+	s.mux.HandleFunc("/api/projects/", s.handleDeleteProject)
 	s.mux.HandleFunc("/api/exploit", s.handleExploit)
 	s.mux.HandleFunc("/api/exploits", s.handleExploitsList)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)

@@ -141,6 +141,24 @@ export interface ExploitInfo {
   cve: string
   severity: string
   targets: string[]
+  supports_check?: boolean
+  supports_execute?: boolean
+  supports_command?: boolean
+  default_command?: string
+}
+
+export interface ExploitRequest {
+  target: string
+  exploit_id?: string
+  mode?: 'check' | 'execute'
+  command?: string
+}
+
+export interface ProjectItem {
+  id: string
+  name: string
+  url: string
+  created_at: string
 }
 
 export interface RunSummary {

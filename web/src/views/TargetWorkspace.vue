@@ -228,6 +228,15 @@
           <el-table-column prop="id" label="Module" width="180" />
           <el-table-column prop="name" label="Name" show-overflow-tooltip />
           <el-table-column prop="cve" label="CVE" width="160" />
+          <el-table-column label="Capabilities" width="220">
+            <template #default="{ row }">
+              <div class="capability-tags">
+                <el-tag size="small" type="info" v-if="row.supports_check !== false">check</el-tag>
+                <el-tag size="small" type="danger" v-if="row.supports_execute">execute</el-tag>
+                <el-tag size="small" type="success" v-if="row.supports_command">echo</el-tag>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="severity" label="Severity" width="90">
             <template #default="{ row }">
               <el-tag size="small" :type="row.severity === 'critical' ? 'danger' : row.severity === 'high' ? 'warning' : 'info'">
@@ -240,7 +249,7 @@
               <el-button size="small" type="primary" @click="doCheck(row)" :loading="executingExploit">
                 Check
               </el-button>
-              <el-button size="small" type="danger" @click="doExploit(row)" :loading="executingExploit">
+              <el-button size="small" type="danger" @click="doExploit(row)" :loading="executingExploit" :disabled="row.supports_execute === false">
                 Exploit
               </el-button>
             </template>
@@ -254,9 +263,49 @@
 
     <el-card v-if="exploitResult" shadow="hover" class="workspace-card">
       <template #header>
-        <span>Exploit Result</span>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Exploit Result</span>
+          <el-tag size="small" :type="exploitStatusTag(exploitResult?.status || exploitResult?.result?.status || '')">
+            {{ exploitResult?.status || exploitResult?.result?.status || 'unknown' }}
+          </el-tag>
+        </div>
       </template>
-      <pre class="result-output">{{ JSON.stringify(exploitResult, null, 2) }}</pre>
+
+      <el-descriptions :column="2" border size="small">
+        <el-descriptions-item label="Mode">{{ exploitResultMode || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="Accepted">{{ formatResultValue(exploitResult?.accepted) }}</el-descriptions-item>
+        <el-descriptions-item label="Status">{{ formatResultValue(exploitResult?.status) }}</el-descriptions-item>
+        <el-descriptions-item label="Request ID">{{ formatResultValue(exploitResult?.request_id) }}</el-descriptions-item>
+      </el-descriptions>
+
+      <div v-if="exploitResultMode === 'check' && exploitResult?.result" class="exploit-result-section">
+        <div class="exploit-result-title">Check Summary</div>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="Vulnerable">{{ formatResultValue(exploitResult.result.vulnerable) }}</el-descriptions-item>
+          <el-descriptions-item label="Confidence">{{ formatConfidence(exploitResult.result.confidence) }}</el-descriptions-item>
+          <el-descriptions-item label="Detail">{{ formatResultValue(exploitResult.result.detail) }}</el-descriptions-item>
+        </el-descriptions>
+      </div>
+
+      <div v-if="exploitExecutionOutput" class="exploit-result-section">
+        <div class="exploit-result-title">Execution Output</div>
+        <pre class="result-output">{{ exploitExecutionOutput }}</pre>
+      </div>
+
+      <div v-else-if="exploitExecutionDetail" class="exploit-result-section">
+        <div class="exploit-result-title">Execution Detail</div>
+        <pre class="result-output">{{ exploitExecutionDetail }}</pre>
+      </div>
+
+      <div v-if="exploitEvidence" class="exploit-result-section">
+        <div class="exploit-result-title">Evidence / Artifacts</div>
+        <pre class="result-output">{{ JSON.stringify(exploitEvidence, null, 2) }}</pre>
+      </div>
+
+      <div class="exploit-result-section">
+        <div class="exploit-result-title">Raw JSON</div>
+        <pre class="result-output">{{ JSON.stringify(exploitResult, null, 2) }}</pre>
+      </div>
     </el-card>
 
     <el-alert
@@ -352,7 +401,12 @@ const exploits = ref<ExploitInfo[]>([])
 const loadingExploits = ref(false)
 const executingExploit = ref(false)
 const exploitResult = ref<any>(null)
+const exploitResultMode = ref<'check' | 'execute' | ''>('')
 let unsubscribe: (() => void) | null = null
+
+const exploitExecutionOutput = computed(() => exploitResult.value?.result?.output || exploitResult.value?.output || '')
+const exploitExecutionDetail = computed(() => exploitResult.value?.result?.detail || exploitResult.value?.message || '')
+const exploitEvidence = computed(() => exploitResult.value?.result?.evidence || exploitResult.value?.result?.artifacts || null)
 
 const nodeResults = computed<NodeRunResult[]>(() => {
   const run = scanStore.currentRun
@@ -600,8 +654,13 @@ async function doCheck(exp: ExploitInfo) {
   if (!requireTarget()) return
   executingExploit.value = true
   try {
-    const resp = await triggerExploit(targetForm.value.target.trim(), exp.id)
+    const resp = await triggerExploit({
+      target: targetForm.value.target.trim(),
+      exploit_id: exp.id,
+      mode: 'check',
+    })
     exploitResult.value = resp
+    exploitResultMode.value = 'check'
     ElMessage.success(`Check completed: ${exp.id}`)
   } catch (e: any) {
     ElMessage.error(e.message)
@@ -614,14 +673,41 @@ async function doExploit(exp: ExploitInfo) {
   if (!requireTarget()) return
   executingExploit.value = true
   try {
-    const resp = await triggerExploit(targetForm.value.target.trim(), exp.id)
+    const payload: any = {
+      target: targetForm.value.target.trim(),
+      exploit_id: exp.id,
+      mode: 'execute',
+    }
+    if (exp.supports_command) {
+      payload.command = exp.default_command || 'id'
+    }
+    const resp = await triggerExploit(payload)
     exploitResult.value = resp
+    exploitResultMode.value = 'execute'
     ElMessage.success(`Exploit executed: ${exp.id}`)
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {
     executingExploit.value = false
   }
+}
+
+function formatResultValue(value: unknown) {
+  if (value === undefined || value === null || value === '') return '-'
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return String(value)
+}
+
+function formatConfidence(value: unknown) {
+  if (typeof value !== 'number') return '-'
+  return value.toFixed(2)
+}
+
+function exploitStatusTag(status: string): string {
+  if (status === 'succeeded' || status === 'success') return 'success'
+  if (status === 'failed' || status === 'error') return 'danger'
+  if (status === 'running' || status === 'accepted') return 'warning'
+  return 'info'
 }
 
 function runStatusTag(status: string): string {
@@ -833,6 +919,23 @@ onBeforeUnmount(() => {
 .preset-param-hint {
   color: #909399;
   font-size: 12px;
+}
+
+.capability-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.exploit-result-section {
+  margin-top: 16px;
+}
+
+.exploit-result-title {
+  color: #c0c4cc;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
 }
 
 .cmd-text {

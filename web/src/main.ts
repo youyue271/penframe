@@ -13,11 +13,13 @@ import ScanControl from './views/ScanControl.vue'
 import ExploitPanel from './views/ExploitPanel.vue'
 import RunHistory from './views/RunHistory.vue'
 import LogViewer from './views/LogViewer.vue'
+import ProjectView from './views/ProjectView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'target', component: TargetWorkspace },
+    { path: '/projects', name: 'projects', component: ProjectView },
     { path: '/dashboard', name: 'dashboard', component: Dashboard },
     { path: '/assets', name: 'assets', component: AssetGraph },
     { path: '/scan', name: 'scan', component: ScanControl },

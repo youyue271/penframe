@@ -179,6 +179,34 @@ func (e ExpExecutor) CheckExploit(ctx context.Context, target, exploitID string)
 	return io.ReadAll(resp.Body)
 }
 
+// RunExploit calls the Python service's execute endpoint for manual portal use.
+func (e ExpExecutor) RunExploit(ctx context.Context, target, exploitID, command string) ([]byte, error) {
+	payload := expRequest{
+		Executor: exploitID,
+		Target:   target,
+		Entry:    target,
+		Command:  command,
+	}
+	if payload.Executor == "" {
+		payload.Executor = "auto"
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/api/v1/execute", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := e.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
 func inputStr(inputs map[string]any, key string) string {
 	if inputs == nil {
 		return ""

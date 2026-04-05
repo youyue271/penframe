@@ -1,6 +1,6 @@
 // HTTP client for the Penframe API.
 
-const API_BASE = import.meta.env.VITE_API_BASE || ''
+export const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 export async function get<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`)
@@ -21,6 +21,16 @@ export async function post<T>(path: string, body?: any): Promise<T> {
     throw new Error(`POST ${path} failed: ${resp.status} - ${text}`)
   }
   return resp.json()
+}
+
+export async function del(path: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+  })
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`DELETE ${path} failed: ${resp.status} - ${text}`)
+  }
 }
 
 export function createSSE(path: string): EventSource {
