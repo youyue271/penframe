@@ -154,11 +154,20 @@ export interface ExploitRequest {
   command?: string
 }
 
-export interface ProjectItem {
+export interface Target {
   id: string
+  project_id: string
   name: string
   url: string
   created_at: string
+  last_scanned?: string
+}
+
+export interface ProjectItem {
+  id: string
+  name: string
+  created_at: string
+  targets?: Target[]
 }
 
 export interface RunSummary {
@@ -202,6 +211,8 @@ export interface RunStats {
 
 export interface StoredRun {
   id: string
+  project_id?: string
+  target_id?: string
   summary: RunSummary
 }
 

@@ -11,37 +11,17 @@
         text-color="#c0c4cc"
         active-text-color="#409eff"
       >
-        <el-menu-item index="/">
-          <el-icon><Aim /></el-icon>
-          <span>Target</span>
-        </el-menu-item>
         <el-menu-item index="/projects">
           <el-icon><Folder /></el-icon>
-          <span>Project</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard">
-          <el-icon><Monitor /></el-icon>
-          <span>Dashboard</span>
+          <span>Projects</span>
         </el-menu-item>
         <el-menu-item index="/assets">
           <el-icon><Share /></el-icon>
           <span>Asset Graph</span>
         </el-menu-item>
-        <el-menu-item index="/scan">
-          <el-icon><Search /></el-icon>
-          <span>Scan Control</span>
-        </el-menu-item>
         <el-menu-item index="/exploit">
           <el-icon><Lightning /></el-icon>
           <span>Exploit</span>
-        </el-menu-item>
-        <el-menu-item index="/history">
-          <el-icon><List /></el-icon>
-          <span>History</span>
-        </el-menu-item>
-        <el-menu-item index="/logs">
-          <el-icon><Document /></el-icon>
-          <span>Logs</span>
         </el-menu-item>
       </el-menu>
       <div class="sse-status">
@@ -59,7 +39,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Monitor, Share, Search, List, Document, Aim, Folder } from '@element-plus/icons-vue'
+import { Monitor, Share, Folder } from '@element-plus/icons-vue'
 import { useSSEStore } from '@/stores/sse'
 
 // Lightning icon placeholder since it may not exist in the icon pack.
@@ -69,7 +49,13 @@ const route = useRoute()
 const sse = useSSEStore()
 
 onMounted(() => {
-  sse.connect()
+  console.log('[App] Component mounted, route:', route.path)
+  try {
+    sse.connect()
+    console.log('[App] SSE connection initiated')
+  } catch (err) {
+    console.error('[App] SSE connection failed:', err)
+  }
 })
 </script>
 

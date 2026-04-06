@@ -9,29 +9,42 @@ import App from './App.vue'
 import Dashboard from './views/Dashboard.vue'
 import TargetWorkspace from './views/TargetWorkspace.vue'
 import AssetGraph from './views/AssetGraph.vue'
-import ScanControl from './views/ScanControl.vue'
 import ExploitPanel from './views/ExploitPanel.vue'
-import RunHistory from './views/RunHistory.vue'
-import LogViewer from './views/LogViewer.vue'
 import ProjectView from './views/ProjectView.vue'
+
+console.log('[Penframe] Starting application...')
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'target', component: TargetWorkspace },
+    { path: '/', redirect: '/projects' },
     { path: '/projects', name: 'projects', component: ProjectView },
-    { path: '/dashboard', name: 'dashboard', component: Dashboard },
+    { path: '/projects/:id', name: 'project-detail', component: Dashboard },
+    { path: '/projects/:id/targets/:tid', name: 'target-detail', component: TargetWorkspace },
+    { path: '/projects/:id/targets/:tid/exploit', name: 'target-exploit', component: ExploitPanel },
     { path: '/assets', name: 'assets', component: AssetGraph },
-    { path: '/scan', name: 'scan', component: ScanControl },
     { path: '/exploit', name: 'exploit', component: ExploitPanel },
-    { path: '/history', name: 'history', component: RunHistory },
-    { path: '/logs', name: 'logs', component: LogViewer },
   ],
 })
 
+console.log('[Penframe] Router created')
 
-const app = createApp(App)
-app.use(createPinia())
-app.use(router)
-app.use(ElementPlus)
-app.mount('#app')
+try {
+  const app = createApp(App)
+  console.log('[Penframe] App created')
+
+  app.use(createPinia())
+  console.log('[Penframe] Pinia installed')
+
+  app.use(router)
+  console.log('[Penframe] Router installed')
+
+  app.use(ElementPlus)
+  console.log('[Penframe] ElementPlus installed')
+
+  app.mount('#app')
+  console.log('[Penframe] App mounted successfully!')
+} catch (err: any) {
+  console.error('[Penframe] Fatal error:', err)
+  document.body.innerHTML = '<div style="color: red; padding: 20px; font-family: monospace;"><h1>Error Loading Penframe</h1><pre>' + (err?.message || String(err)) + '\n\n' + (err?.stack || '') + '</pre></div>'
+}

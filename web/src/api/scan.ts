@@ -1,7 +1,17 @@
 import { get, post } from './client'
 import type { PortalStateResponse, ScanRequest, ScanResponse, ScanTask, StoredRun } from '@/types'
 
-export function startScan(req: ScanRequest): Promise<ScanResponse> {
+export interface ScanRequestWithContext extends ScanRequest {
+  project_id?: string
+  target_id?: string
+}
+
+export interface RunQuery {
+  projectId?: string
+  targetId?: string
+}
+
+export function startScan(req: ScanRequestWithContext): Promise<ScanResponse> {
   return post<ScanResponse>('/api/scan', req)
 }
 
@@ -10,8 +20,16 @@ export function fetchTasks(runId?: string): Promise<{ tasks: ScanTask[] }> {
   return get<{ tasks: ScanTask[] }>(`/api/tasks${query}`)
 }
 
-export function fetchRuns(limit = 20): Promise<{ runs: StoredRun[] }> {
-  return get<{ runs: StoredRun[] }>(`/api/runs?limit=${limit}`)
+export function fetchRuns(limit = 20, query: RunQuery = {}): Promise<{ runs: StoredRun[] }> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (query.projectId) params.set('project_id', query.projectId)
+  if (query.targetId) params.set('target_id', query.targetId)
+  return get<{ runs: StoredRun[] }>(`/api/runs?${params.toString()}`)
+}
+
+export async function fetchLatestTargetRun(projectId: string, targetId: string): Promise<StoredRun | null> {
+  const response = await fetchRuns(1, { projectId, targetId })
+  return response.runs?.[0] || null
 }
 
 export function fetchRunById(id: string): Promise<{ run: StoredRun }> {

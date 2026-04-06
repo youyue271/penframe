@@ -21,6 +21,8 @@ type scanRequest struct {
 	Tools          map[string]string `json:"tools,omitempty"`
 	Vars           map[string]any    `json:"vars,omitempty"`
 	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+	ProjectID      string            `json:"project_id,omitempty"`
+	TargetID       string            `json:"target_id,omitempty"`
 }
 
 type scanResponse struct {
@@ -57,6 +59,12 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	runID := fmt.Sprintf("scan-%d", time.Now().UTC().UnixNano())
 	initialRun := s.newInitialScanRun(runID, req)
 
+	// Store project/target context if provided
+	if req.ProjectID != "" || req.TargetID != "" {
+		initialRun.ProjectID = req.ProjectID
+		initialRun.TargetID = req.TargetID
+	}
+
 	// Generate initial tasks.
 	tasks := s.newInitialScanTasks(runID, req)
 	for _, t := range tasks {
@@ -66,7 +74,13 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	// Create asset graph for this run.
 	s.assets.GetOrCreate(runID, req.Target)
 
-	s.store.Save(initialRun.ID, initialRun.Summary)
+	if err := s.store.SaveRun(initialRun); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("save scan run: %w", err))
+		return
+	}
+	if req.TargetID != "" {
+		_ = s.projects.UpdateTargetLastScanned(req.TargetID, time.Now().UTC())
+	}
 
 	// Also run the existing workflow for backward compatibility.
 	go s.executeScanWorkflow(runID, req)
@@ -141,7 +155,13 @@ func (s *Server) executeScanWorkflow(runID string, req scanRequest) {
 
 	observedCtx := workflow.WithEventObserver(ctx, workflow.EventObserverFunc(func(event workflow.Event) {
 		if event.Summary != nil {
-			s.store.Save(runID, *event.Summary)
+			storedRun, ok := s.store.GetStoredRun(runID)
+			if ok {
+				storedRun.Summary = *event.Summary
+				_ = s.store.SaveRun(storedRun)
+			} else {
+				_ = s.store.Save(runID, *event.Summary)
+			}
 		}
 
 		switch event.Type {
@@ -176,10 +196,12 @@ func (s *Server) executeScanWorkflow(runID string, req scanRequest) {
 	summary, runErr := runner.Run(observedCtx, wf)
 
 	run := storage.StoredRun{
-		ID:      runID,
-		Summary: summary,
+		ID:        runID,
+		ProjectID: req.ProjectID,
+		TargetID:  req.TargetID,
+		Summary:   summary,
 	}
-	s.store.Save(run.ID, run.Summary)
+	_ = s.store.SaveRun(run)
 
 	if runErr != nil {
 		errMsg := runErr.Error()

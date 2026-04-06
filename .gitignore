@@ -15,6 +15,7 @@ coverage.*
 output/
 tmp/
 *.log
+.penframe/
 
 # Local examples / playground data
 examples/
@@ -34,3 +35,9 @@ Thumbs.db
 
 # Local recovery folders
 .git_failed_init_*/
+
+# Frontend debug pages
+web/public/debug.html
+web/public/test.html
+web/test-app.html
+web/test-vue.html

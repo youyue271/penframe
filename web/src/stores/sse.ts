@@ -14,15 +14,22 @@ export const useSSEStore = defineStore('sse', () => {
 
   function connect() {
     if (source) return
-    source = createSSE('/api/events')
 
-    source.onopen = () => {
-      connected.value = true
-    }
+    try {
+      source = createSSE('/api/events')
 
-    source.onerror = () => {
-      connected.value = false
-      // Auto-reconnect is handled by EventSource.
+      source.onopen = () => {
+        console.log('[SSE] Connected')
+        connected.value = true
+      }
+
+      source.onerror = (err) => {
+        console.warn('[SSE] Connection error, will auto-reconnect:', err)
+        connected.value = false
+        // Auto-reconnect is handled by EventSource.
+      }
+    } catch (err) {
+      console.error('[SSE] Failed to create EventSource:', err)
     }
 
     // Listen for all event types.
@@ -36,7 +43,7 @@ export const useSSEStore = defineStore('sse', () => {
     ]
 
     for (const type of eventTypes) {
-      source.addEventListener(type, (e: MessageEvent) => {
+      source?.addEventListener(type, (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data) as SSEvent
           lastEvent.value = data

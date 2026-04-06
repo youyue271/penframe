@@ -1,985 +1,479 @@
 <template>
   <div class="target-workspace">
-    <h1>Target Workspace</h1>
+    <div class="workspace-header">
+      <div class="header-left">
+        <el-button size="small" @click="goBack">← Back</el-button>
+        <h1>{{ currentTarget?.name || 'Target Details' }}</h1>
+      </div>
+      <div class="header-right">
+        <el-tag v-if="currentTarget" type="info">{{ currentTarget.url }}</el-tag>
+      </div>
+    </div>
 
-    <el-card shadow="hover" class="workspace-card">
-      <template #header>
-        <span>Target Configuration</span>
-      </template>
-      <el-form label-width="140px" @submit.prevent="startScan">
-        <el-form-item label="Target Address">
-          <el-input
-            v-model="targetForm.target"
-            placeholder="IP / CIDR / Domain / URL (e.g. https://target:3000)"
-            clearable
-            @keyup.enter="startScan"
-          />
-        </el-form-item>
+    <el-tabs v-model="activeTab" class="workspace-tabs">
+      <el-tab-pane label="Scan" name="scan">
+        <el-card shadow="hover" class="workspace-card">
+          <template #header>
+            <span>Run Scan</span>
+          </template>
+          <el-form label-width="140px" @submit.prevent="startScan">
+            <el-form-item label="Target">
+              <el-input :value="currentTarget?.url" disabled />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="scanning" @click="startScan">Start Scan</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
 
-        <el-form-item label="Workflow">
-          <div class="workflow-meta">
-            <el-tag type="info" size="small">
-              {{ workflowState?.workflow.name || 'Loading workflow...' }}
-            </el-tag>
-            <span class="workflow-description">
-              {{ workflowState?.workflow.description || 'Using current backend workflow definition.' }}
-            </span>
-          </div>
-        </el-form-item>
+        <el-card v-if="scanResult" shadow="hover" class="workspace-card">
+          <template #header>
+            <span>Scan Results</span>
+          </template>
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="Run ID">{{ scanResult.run_id }}</el-descriptions-item>
+            <el-descriptions-item label="Status">
+              <el-tag size="small" :type="scanResult.run?.summary.status === 'success' ? 'success' : 'danger'">
+                {{ scanResult.run?.summary.status || 'running' }}
+              </el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+      </el-tab-pane>
 
-        <el-form-item label="Node Presets">
-          <div class="workflow-preset-compact">
-            <el-collapse v-if="presetSections.length" v-model="activePresetSections">
-              <el-collapse-item
-                v-for="section in presetSections"
-                :key="section.key"
-                :name="section.key"
-              >
-                <template #title>
-                  <div class="section-title-row">
-                    <div class="section-title-left">
-                      <span class="section-title">{{ section.label }}</span>
-                      <el-tag size="small" type="info">{{ section.presets.length }}</el-tag>
-                    </div>
-                    <span class="section-description">{{ section.description }}</span>
-                  </div>
-                </template>
+      <el-tab-pane label="Assets" name="assets">
+        <el-card shadow="hover" class="workspace-card">
+          <template #header>
+            <div class="card-header">
+              <span>Asset Summary</span>
+              <el-button size="small" @click="loadAssets" :loading="assetStore.loading">Refresh</el-button>
+            </div>
+          </template>
+          <el-row :gutter="20" class="stat-cards">
+            <el-col :span="6">
+              <div class="stat-card">
+                <div class="stat-number">{{ assetStore.summary.hosts }}</div>
+                <div class="stat-label">Hosts</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="stat-card">
+                <div class="stat-number">{{ assetStore.summary.ports }}</div>
+                <div class="stat-label">Ports</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="stat-card">
+                <div class="stat-number">{{ assetStore.summary.paths }}</div>
+                <div class="stat-label">Paths</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="stat-card">
+                <div class="stat-number" :class="{ 'has-vulns': assetStore.summary.vulns > 0 }">
+                  {{ assetStore.summary.vulns }}
+                </div>
+                <div class="stat-label">Vulnerabilities</div>
+              </div>
+            </el-col>
+          </el-row>
+        </el-card>
 
-                <div class="section-content">
-                  <div v-if="section.presets.length" class="section-preset-list">
-                    <div
-                      v-for="preset in section.presets"
-                      :key="preset.node.id"
-                      class="preset-panel"
-                    >
-                      <div class="preset-title-row">
-                        <div class="preset-title-left">
-                          <span class="preset-node-id">{{ preset.node.id }}</span>
-                          <el-tag size="small" :type="categoryTagType(preset.tool?.category)">
-                            {{ preset.node.tool }}
-                          </el-tag>
-                          <el-tag size="small" type="info">
-                            {{ preset.node.executor }}
-                          </el-tag>
-                        </div>
-                        <el-switch
-                          v-if="preset.enableVar && nodeSettings[preset.node.id]"
-                          v-model="nodeSettings[preset.node.id].enabled"
-                          size="small"
-                        />
-                      </div>
-
-                      <div class="preset-description">
-                        {{ preset.tool?.description || `Executor: ${preset.node.executor}` }}
-                      </div>
-
-                      <div class="preset-command-block">
-                        <div class="preset-command-label">Command</div>
-                        <pre class="preset-command">{{ commandPreview(preset) }}</pre>
-                      </div>
-
-                      <div v-if="preset.fields.length && nodeSettings[preset.node.id]" class="preset-params">
-                        <div v-for="field in preset.fields" :key="`${preset.node.id}-${field.name}`" class="preset-param">
-                          <label class="preset-param-label">{{ field.label }}</label>
-                          <el-input
-                            v-model="nodeSettings[preset.node.id].params[field.name]"
-                            type="textarea"
-                            :autosize="{ minRows: 1, maxRows: 3 }"
-                            size="small"
-                          />
-                          <div v-if="field.description" class="preset-param-hint">
-                            {{ field.description }}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="empty-hint section-empty">
-                    Current workflow does not define nodes in this section.
+        <!-- Host Details -->
+        <el-card v-if="assetStore.hosts.length > 0" shadow="hover" class="workspace-card">
+          <template #header>
+            <span>Discovered Hosts</span>
+          </template>
+          <el-collapse accordion>
+            <el-collapse-item v-for="host in assetStore.hosts" :key="host.id" :name="host.id">
+              <template #title>
+                <div class="host-title">
+                  <el-tag type="success" size="small">{{ host.ip }}</el-tag>
+                  <span v-if="host.hostname" class="host-domain">{{ host.hostname }}</span>
+                  <div class="host-badges">
+                    <el-badge :value="host.ports?.length || 0" type="warning" />
+                    <span class="badge-label">ports</span>
+                    <el-badge v-if="countHostVulns(host) > 0" :value="countHostVulns(host)" type="danger" />
+                    <span v-if="countHostVulns(host) > 0" class="badge-label">vulns</span>
                   </div>
                 </div>
-              </el-collapse-item>
-            </el-collapse>
+              </template>
 
-            <div v-else class="empty-hint">
-              Loading workflow node presets...
-            </div>
-          </div>
-        </el-form-item>
+              <!-- Port List -->
+              <el-table v-if="host.ports && host.ports.length > 0" :data="host.ports" size="small" stripe>
+                <el-table-column prop="port" label="Port" width="80" />
+                <el-table-column prop="service" label="Service" width="120" />
+                <el-table-column prop="protocol" label="Protocol" width="100" />
+                <el-table-column label="Paths" width="80">
+                  <template #default="{ row }">
+                    <el-tag v-if="row.paths && row.paths.length > 0" size="small" type="info">
+                      {{ row.paths.length }}
+                    </el-tag>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="Vulnerabilities" width="150">
+                  <template #default="{ row }">
+                    <div v-if="row.vulns && row.vulns.length > 0" class="vuln-tags">
+                      <el-tag v-for="vuln in row.vulns.slice(0, 2)" :key="vuln.id"
+                        size="small" :type="vulnSeverityType(vuln.severity)">
+                        {{ vuln.name }}
+                      </el-tag>
+                      <el-tag v-if="row.vulns.length > 2" size="small" type="info">
+                        +{{ row.vulns.length - 2 }}
+                      </el-tag>
+                    </div>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="Actions" width="120" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" @click="viewPortDetails(host, row)">Details</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div v-else class="empty-hint">No ports discovered</div>
+            </el-collapse-item>
+          </el-collapse>
+        </el-card>
 
-        <el-form-item label="Timeout (s)">
-          <el-input-number v-model="targetForm.timeout" :min="30" :max="86400" :step="60" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" size="large" :loading="scanStore.scanning" @click="startScan">
-            Start Scan
-          </el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card v-if="scanStore.currentRunId" shadow="hover" class="workspace-card">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>
-            Scan Pipeline
-            <el-tag
-              v-if="scanStore.currentRun"
-              size="small"
-              :type="runStatusTag(scanStore.currentRun.summary.status)"
-              style="margin-left: 8px;"
-            >
-              {{ scanStore.currentRun.summary.status }}
-            </el-tag>
-            <el-tag v-else size="small" type="info" style="margin-left: 8px;">
-              Loading...
-            </el-tag>
-          </span>
-          <el-button size="small" @click="refreshCurrentRun">Refresh</el-button>
-        </div>
-      </template>
-
-      <el-table :data="currentRunTasks" style="width: 100%" size="small" stripe>
-        <el-table-column prop="node_id" label="Node" width="180" show-overflow-tooltip />
-        <el-table-column prop="type" label="Tool" width="180">
-          <template #default="{ row }">
-            <el-tag size="small" :type="taskTagType(row.type)">
-              {{ row.type }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="target" label="Target" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="status" label="Status" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="taskStatusTag(row.status)">
-              {{ row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="error" label="Error" show-overflow-tooltip />
-      </el-table>
-
-      <el-divider v-if="scanStore.currentRun && nodeResults.length" content-position="left">Workflow Nodes</el-divider>
-
-      <el-table v-if="scanStore.currentRun && nodeResults.length" :data="nodeResults" style="width: 100%" size="small" stripe>
-        <el-table-column prop="node_id" label="Phase" width="180" />
-        <el-table-column prop="tool" label="Tool" width="160" />
-        <el-table-column prop="status" label="Status" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="nodeStatusTag(row.status)">
-              {{ row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Command" min-width="300">
-          <template #default="{ row }">
-            <code v-if="row.rendered_command" class="cmd-text">{{ row.rendered_command }}</code>
-            <span v-else class="cmd-text cmd-na">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="duration_millis" label="Duration" width="90">
-          <template #default="{ row }">
-            {{ row.duration_millis ? `${(row.duration_millis / 1000).toFixed(1)}s` : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="record_count" label="Findings" width="80" />
-        <el-table-column prop="error" label="Error" show-overflow-tooltip />
-      </el-table>
-      <div v-else style="text-align: center; padding: 20px; color: #909399;">
-        Waiting for workflow node results...
-      </div>
-
-      <el-descriptions v-if="scanStore.currentRun" :column="3" border size="small" style="margin-top: 12px;">
-        <el-descriptions-item label="Run ID">{{ scanStore.currentRun.id }}</el-descriptions-item>
-        <el-descriptions-item label="Started">{{ formatDate(scanStore.currentRun.summary.started_at) }}</el-descriptions-item>
-        <el-descriptions-item label="Finished">{{ formatDate(scanStore.currentRun.summary.finished_at) }}</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <el-card v-if="directOutputs.length" shadow="hover" class="workspace-card">
-      <template #header>
-        <span>Scan Output</span>
-      </template>
-      <el-collapse>
-        <el-collapse-item v-for="item in directOutputs" :key="item.key" :name="item.key">
-          <template #title>
-            <div class="output-title">
-              <span>{{ item.title }}</span>
-              <el-tag size="small" :type="nodeStatusTag(item.status)">
-                {{ item.status }}
-              </el-tag>
+        <!-- Vulnerability Summary -->
+        <el-card v-if="allVulnerabilities.length > 0" shadow="hover" class="workspace-card">
+          <template #header>
+            <div class="card-header">
+              <span>Vulnerabilities</span>
+              <el-tag type="danger">{{ allVulnerabilities.length }} found</el-tag>
             </div>
           </template>
-          <pre class="result-output">{{ item.content }}</pre>
-        </el-collapse-item>
-      </el-collapse>
-    </el-card>
+          <el-table :data="allVulnerabilities" size="small" stripe>
+            <el-table-column label="Severity" width="100">
+              <template #default="{ row }">
+                <el-tag size="small" :type="vulnSeverityType(row.severity)">
+                  {{ row.severity || 'unknown' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="name" label="Name" width="200" />
+            <el-table-column prop="target" label="Target" show-overflow-tooltip />
+            <el-table-column label="Exploitable" width="100">
+              <template #default="{ row }">
+                <el-tag v-if="row.exp_available" size="small" type="danger">Yes</el-tag>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.exp_available" size="small" type="danger" @click="exploitVuln(row)">
+                  Exploit
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
 
-    <el-card shadow="hover" class="workspace-card">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>Exploit</span>
-          <el-button size="small" @click="loadExploits" :loading="loadingExploits">Refresh Modules</el-button>
+        <div v-if="!assetStore.loading && assetStore.hosts.length === 0" class="empty-hint">
+          No assets discovered yet. Run a scan to discover assets.
         </div>
-      </template>
+      </el-tab-pane>
 
-      <div v-if="exploits.length" class="exploit-section">
-        <el-table :data="exploits" style="width: 100%" size="small" stripe>
-          <el-table-column prop="id" label="Module" width="180" />
-          <el-table-column prop="name" label="Name" show-overflow-tooltip />
-          <el-table-column prop="cve" label="CVE" width="160" />
-          <el-table-column label="Capabilities" width="220">
-            <template #default="{ row }">
-              <div class="capability-tags">
-                <el-tag size="small" type="info" v-if="row.supports_check !== false">check</el-tag>
-                <el-tag size="small" type="danger" v-if="row.supports_execute">execute</el-tag>
-                <el-tag size="small" type="success" v-if="row.supports_command">echo</el-tag>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="severity" label="Severity" width="90">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.severity === 'critical' ? 'danger' : row.severity === 'high' ? 'warning' : 'info'">
-                {{ row.severity }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="Actions" width="200">
-            <template #default="{ row }">
-              <el-button size="small" type="primary" @click="doCheck(row)" :loading="executingExploit">
-                Check
-              </el-button>
-              <el-button size="small" type="danger" @click="doExploit(row)" :loading="executingExploit" :disabled="row.supports_execute === false">
-                Exploit
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-      <div v-else class="empty-hint">
-        No exploit modules loaded. Ensure the Python exp service is running.
-      </div>
-    </el-card>
-
-    <el-card v-if="exploitResult" shadow="hover" class="workspace-card">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>Exploit Result</span>
-          <el-tag size="small" :type="exploitStatusTag(exploitResult?.status || exploitResult?.result?.status || '')">
-            {{ exploitResult?.status || exploitResult?.result?.status || 'unknown' }}
-          </el-tag>
-        </div>
-      </template>
-
-      <el-descriptions :column="2" border size="small">
-        <el-descriptions-item label="Mode">{{ exploitResultMode || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Accepted">{{ formatResultValue(exploitResult?.accepted) }}</el-descriptions-item>
-        <el-descriptions-item label="Status">{{ formatResultValue(exploitResult?.status) }}</el-descriptions-item>
-        <el-descriptions-item label="Request ID">{{ formatResultValue(exploitResult?.request_id) }}</el-descriptions-item>
-      </el-descriptions>
-
-      <div v-if="exploitResultMode === 'check' && exploitResult?.result" class="exploit-result-section">
-        <div class="exploit-result-title">Check Summary</div>
-        <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="Vulnerable">{{ formatResultValue(exploitResult.result.vulnerable) }}</el-descriptions-item>
-          <el-descriptions-item label="Confidence">{{ formatConfidence(exploitResult.result.confidence) }}</el-descriptions-item>
-          <el-descriptions-item label="Detail">{{ formatResultValue(exploitResult.result.detail) }}</el-descriptions-item>
-        </el-descriptions>
-      </div>
-
-      <div v-if="exploitExecutionOutput" class="exploit-result-section">
-        <div class="exploit-result-title">Execution Output</div>
-        <pre class="result-output">{{ exploitExecutionOutput }}</pre>
-      </div>
-
-      <div v-else-if="exploitExecutionDetail" class="exploit-result-section">
-        <div class="exploit-result-title">Execution Detail</div>
-        <pre class="result-output">{{ exploitExecutionDetail }}</pre>
-      </div>
-
-      <div v-if="exploitEvidence" class="exploit-result-section">
-        <div class="exploit-result-title">Evidence / Artifacts</div>
-        <pre class="result-output">{{ JSON.stringify(exploitEvidence, null, 2) }}</pre>
-      </div>
-
-      <div class="exploit-result-section">
-        <div class="exploit-result-title">Raw JSON</div>
-        <pre class="result-output">{{ JSON.stringify(exploitResult, null, 2) }}</pre>
-      </div>
-    </el-card>
-
-    <el-alert
-      v-if="scanStore.error"
-      :title="scanStore.error"
-      type="error"
-      closable
-      class="workspace-alert"
-      @close="scanStore.error = ''"
-    />
+      <el-tab-pane label="Exploit" name="exploit">
+        <el-card shadow="hover" class="workspace-card">
+          <template #header>
+            <span>Available Exploits</span>
+          </template>
+          <el-table v-if="exploits.length" :data="exploits" size="small" stripe>
+            <el-table-column prop="name" label="Name" width="200" />
+            <el-table-column prop="cve" label="CVE" width="150" />
+            <el-table-column prop="severity" label="Severity" width="100">
+              <template #default="{ row }">
+                <el-tag size="small" :type="severityTag(row.severity)">{{ row.severity }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="description" label="Description" show-overflow-tooltip />
+            <el-table-column label="Actions" width="200" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="checkExploit(row)">Check</el-button>
+                <el-button size="small" type="danger" @click="runExploit(row)">Exploit</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="empty-hint">No exploits available</div>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { listExploits, triggerExploit } from '@/api/exploit'
-import { fetchState } from '@/api/scan'
-import { useScanStore } from '@/stores/scan'
-import { useSSEStore } from '@/stores/sse'
-import type {
-  ExploitInfo,
-  NodeRunResult,
-  PortalStateResponse,
-  ScanTask,
-  ToolDefinition,
-  WorkflowNodeDefinition,
-} from '@/types'
+import { getProjectTargets, type Target } from '@/api/target'
+import { fetchLatestTargetRun, startScan as startScanAPI } from '@/api/scan'
+import { listExploits, type ExploitInfo } from '@/api/exploit'
+import { useAssetStore } from '@/stores/asset'
 
-type DirectOutput = {
-  key: string
-  title: string
-  status: string
-  content: string
-}
+const route = useRoute()
+const router = useRouter()
+const assetStore = useAssetStore()
 
-type WorkflowPresetField = {
-  name: string
-  label: string
-  description: string
-}
-
-type WorkflowPreset = {
-  node: WorkflowNodeDefinition
-  tool?: ToolDefinition
-  enableVar?: string
-  fields: WorkflowPresetField[]
-}
-
-type PresetSectionKey = 'host' | 'port' | 'path' | 'vuln'
-
-type PresetSection = {
-  key: PresetSectionKey
-  label: string
-  description: string
-  presets: WorkflowPreset[]
-}
-
-type NodeSetting = {
-  enabled: boolean
-  params: Record<string, string>
-}
-
-const targetForm = ref({
-  target: '',
-  timeout: 1800,
-})
-
-const derivedVarNames = new Set([
-  'target',
-  'target_url',
-  'target_host',
-  'target_hostport',
-  'target_port',
-  'target_scheme',
-  'target_origin',
-  'target_path',
-  'output_root',
-  'output_target',
-  'output_dir',
-  'output_dir_windows',
-])
-
-const scanStore = useScanStore()
-const sseStore = useSSEStore()
-
-const workflowState = ref<PortalStateResponse | null>(null)
-const workflowPresets = ref<WorkflowPreset[]>([])
-const nodeSettings = ref<Record<string, NodeSetting>>({})
-const activePresetSections = ref<PresetSectionKey[]>(['host', 'port', 'path', 'vuln'])
-
+const projectId = computed(() => route.params.id as string)
+const targetId = computed(() => route.params.tid as string)
+const currentTarget = ref<Target | null>(null)
+const activeTab = ref('scan')
+const scanning = ref(false)
+const scanResult = ref<any>(null)
 const exploits = ref<ExploitInfo[]>([])
-const loadingExploits = ref(false)
-const executingExploit = ref(false)
-const exploitResult = ref<any>(null)
-const exploitResultMode = ref<'check' | 'execute' | ''>('')
-let unsubscribe: (() => void) | null = null
 
-const exploitExecutionOutput = computed(() => exploitResult.value?.result?.output || exploitResult.value?.output || '')
-const exploitExecutionDetail = computed(() => exploitResult.value?.result?.detail || exploitResult.value?.message || '')
-const exploitEvidence = computed(() => exploitResult.value?.result?.evidence || exploitResult.value?.result?.artifacts || null)
-
-const nodeResults = computed<NodeRunResult[]>(() => {
-  const run = scanStore.currentRun
-  if (!run) return []
-  const order = run.summary.execution_order || []
-  const results = run.summary.node_results || {}
-  const ordered: NodeRunResult[] = []
-  for (const id of order) {
-    if (results[id]) ordered.push(results[id])
-  }
-  for (const [id, result] of Object.entries(results)) {
-    if (!order.includes(id)) ordered.push(result)
-  }
-  return ordered
-})
-
-const directOutputs = computed<DirectOutput[]>(() => {
-  const outputs: DirectOutput[] = []
-  for (const result of nodeResults.value) {
-    if (result.records?.length) {
-      outputs.push({
-        key: `${result.node_id}-records`,
-        title: `${result.node_id} · parsed records (${result.records.length})`,
-        status: result.status,
-        content: JSON.stringify(result.records, null, 2),
+const allVulnerabilities = computed(() => {
+  const vulns: any[] = []
+  assetStore.hosts.forEach((host: any) => {
+    host.ports?.forEach((port: any) => {
+      port.vulns?.forEach((vuln: any) => {
+        vulns.push({ ...vuln, host: host.ip, port: port.port })
       })
-    }
-    if (result.metadata && Object.keys(result.metadata).length > 0) {
-      outputs.push({
-        key: `${result.node_id}-metadata`,
-        title: `${result.node_id} · metadata`,
-        status: result.status,
-        content: JSON.stringify(result.metadata, null, 2),
+      port.paths?.forEach((path: any) => {
+        path.vulns?.forEach((vuln: any) => {
+          vulns.push({ ...vuln, host: host.ip, port: port.port, path: path.path })
+        })
       })
-    }
-    if (result.stdout?.trim()) {
-      outputs.push({
-        key: `${result.node_id}-stdout`,
-        title: `${result.node_id} · stdout`,
-        status: result.status,
-        content: result.stdout.trim(),
-      })
-    }
-  }
-  return outputs
-})
-
-const currentRunTasks = computed<ScanTask[]>(() => {
-  if (!scanStore.currentRunId) return scanStore.tasks
-  return scanStore.tasks.filter((task) => task.parent_id === scanStore.currentRunId)
-})
-
-const presetSections = computed<PresetSection[]>(() => {
-  const base: Array<Omit<PresetSection, 'presets'>> = [
-    { key: 'host', label: '主机发现', description: '目标初始化、主机识别与范围种子。' },
-    { key: 'port', label: '端口发现', description: '端口、服务与基础服务探测。' },
-    { key: 'path', label: '路径发现', description: '入口、路径、页面与 Web 面探测。' },
-    { key: 'vuln', label: '漏洞发现', description: '指纹、漏洞与后续利用相关节点。' },
-  ]
-
-  return base.map((item) => ({
-    ...item,
-    presets: workflowPresets.value.filter((preset) => classifyPresetSection(preset) === item.key),
-  }))
-})
-
-function collectVarRefs(value: any, refs: Set<string>) {
-  if (typeof value === 'string') {
-    const pattern = /\.vars\.([A-Za-z0-9_]+)/g
-    let match: RegExpExecArray | null
-    while ((match = pattern.exec(value)) !== null) {
-      refs.add(match[1])
-    }
-    return
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectVarRefs(item, refs))
-    return
-  }
-  if (value && typeof value === 'object') {
-    Object.values(value).forEach((item) => collectVarRefs(item, refs))
-  }
-}
-
-function formatVarLabel(name: string) {
-  return name.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function includesAny(text: string, words: string[]) {
-  return words.some((word) => text.includes(word))
-}
-
-function classifyPresetSection(preset: WorkflowPreset): PresetSectionKey {
-  const text = [
-    preset.node.id,
-    preset.node.tool,
-    preset.tool?.category || '',
-    preset.tool?.description || '',
-  ].join(' ').toLowerCase()
-
-  if (includesAny(text, ['cve', 'vuln', 'nuclei', 'fingerprint', 'executor', 'exploit', 'xray'])) {
-    return 'vuln'
-  }
-  if (includesAny(text, ['path', 'entry', 'dirsearch', 'ffuf', 'http', 'web', 'page', 'url'])) {
-    return 'path'
-  }
-  if (includesAny(text, ['port', 'nmap', 'masscan', 'service_discovery', 'service discovery'])) {
-    return 'port'
-  }
-  return 'host'
-}
-
-function buildWorkflowPresets(state: PortalStateResponse) {
-  const toolMap = new Map(state.tools.map((tool) => [tool.name, tool]))
-  const globalVars = state.workflow.global_vars || {}
-  const previousSettings = nodeSettings.value
-  const presets: WorkflowPreset[] = []
-  for (const node of state.workflow.nodes) {
-    const tool = toolMap.get(node.tool)
-    if (tool?.category === 'orchestration') {
-      continue
-    }
-
-    const refs = new Set<string>()
-    collectVarRefs(node.inputs || {}, refs)
-    const enableVar = refs.has(`run_${node.id}`)
-      ? `run_${node.id}`
-      : [...refs].find((name) => name.startsWith('run_'))
-
-    const fields = [...refs]
-      .filter((name) => name !== enableVar && !derivedVarNames.has(name) && globalVars[name] !== undefined)
-      .map((name) => ({
-        name,
-        label: formatVarLabel(name),
-        description: String(tool?.variables?.find((item) => item.name === name)?.description || ''),
-      }))
-
-    presets.push({
-      node,
-      tool,
-      enableVar,
-      fields,
     })
-  }
-  workflowPresets.value = presets
+  })
+  return vulns
+})
 
-  const nextSettings: Record<string, NodeSetting> = {}
-  for (const preset of workflowPresets.value) {
-    const previous = previousSettings[preset.node.id]
-    const params: Record<string, string> = {}
-    for (const field of preset.fields) {
-      params[field.name] = previous?.params?.[field.name] ?? String(globalVars[field.name] ?? '')
-    }
-    nextSettings[preset.node.id] = {
-      enabled: previous?.enabled ?? Boolean(globalVars[preset.enableVar || ''] ?? true),
-      params,
-    }
-  }
-  nodeSettings.value = nextSettings
+function countHostVulns(host: any): number {
+  let count = 0
+  host.ports?.forEach((port: any) => {
+    count += port.vulns?.length || 0
+    port.paths?.forEach((path: any) => {
+      count += path.vulns?.length || 0
+    })
+  })
+  return count
 }
 
-async function loadWorkflowState() {
+function vulnSeverityType(severity: string): string {
+  const s = (severity || '').toLowerCase()
+  if (s === 'critical' || s === 'high') return 'danger'
+  if (s === 'medium') return 'warning'
+  return 'info'
+}
+
+function viewPortDetails(host: any, port: any) {
+  ElMessage.info(`Port ${port.port} on ${host.ip}`)
+}
+
+function exploitVuln(vuln: any) {
+  ElMessage.warning(`Exploit: ${vuln.name}`)
+}
+
+function goBack() {
+  router.push(`/projects/${projectId.value}`)
+}
+
+async function loadTarget() {
   try {
-    const response = await fetchState()
-    workflowState.value = response
-    if (!targetForm.value.target.trim()) {
-      targetForm.value.target = String(response.workflow.global_vars?.target || '')
-    }
-    buildWorkflowPresets(response)
+    const targets = await getProjectTargets(projectId.value)
+    currentTarget.value = targets.find(t => t.id === targetId.value) || null
   } catch (e: any) {
-    ElMessage.warning(`Could not load workflow state: ${e.message}`)
+    ElMessage.error(`Failed to load target: ${e.message}`)
   }
 }
 
-function buildScanVars() {
-  const vars: Record<string, any> = {}
-  for (const preset of workflowPresets.value) {
-    const setting = nodeSettings.value[preset.node.id]
-    if (!setting) continue
-    if (preset.enableVar) {
-      vars[preset.enableVar] = setting.enabled
+async function restoreLatestScan() {
+  if (!currentTarget.value) {
+    scanResult.value = null
+    assetStore.clear()
+    return
+  }
+
+  try {
+    const latestRun = await fetchLatestTargetRun(projectId.value, targetId.value)
+    if (!latestRun) {
+      scanResult.value = null
+      assetStore.clear()
+      return
     }
-    for (const field of preset.fields) {
-      const value = setting.params[field.name]?.trim?.() ?? setting.params[field.name]
-      if (value !== '') {
-        vars[field.name] = value
-      }
+
+    scanResult.value = {
+      run_id: latestRun.id,
+      run: latestRun,
     }
+    await assetStore.load(latestRun.id)
+  } catch (e: any) {
+    ElMessage.warning(`Failed to restore latest scan: ${e.message}`)
   }
-  return vars
-}
-
-function commandPreview(preset: WorkflowPreset) {
-  return preset.tool?.command_template?.trim() || `Executor: ${preset.node.executor}`
-}
-
-function requireTarget(): boolean {
-  if (!targetForm.value.target.trim()) {
-    ElMessage.warning('Please enter a target')
-    return false
-  }
-  return true
 }
 
 async function startScan() {
-  if (!requireTarget()) return
+  if (!currentTarget.value) return
+
+  scanning.value = true
   try {
-    const resp = await scanStore.scan({
-      target: targetForm.value.target.trim(),
-      strategy: 'custom',
-      vars: buildScanVars(),
-      timeout_seconds: targetForm.value.timeout,
+    const result = await startScanAPI({
+      target: currentTarget.value.url,
+      project_id: projectId.value,
+      target_id: targetId.value
     })
-    ElMessage.success(`Scan started: ${resp.run_id}`)
-    await refreshCurrentRun()
+    scanResult.value = result
+    await assetStore.load(result.run_id)
+    ElMessage.success('Scan started')
   } catch (e: any) {
-    ElMessage.error(e.message)
+    ElMessage.error(`Scan failed: ${e.message}`)
+  } finally {
+    scanning.value = false
   }
 }
 
-async function refreshCurrentRun() {
-  if (!scanStore.currentRunId) return
-  try {
-    await scanStore.loadRun(scanStore.currentRunId)
-    await scanStore.loadTasks(scanStore.currentRunId)
-  } catch {
-    // store already records the error
+async function loadAssets() {
+  if (!scanResult.value?.run_id) {
+    ElMessage.warning('No scan results available')
+    return
   }
+  await assetStore.load(scanResult.value.run_id)
 }
 
 async function loadExploits() {
-  loadingExploits.value = true
   try {
-    const resp = await listExploits()
-    exploits.value = resp.exploits || []
+    exploits.value = await listExploits()
   } catch (e: any) {
     ElMessage.warning(`Could not load exploits: ${e.message}`)
-    exploits.value = []
-  } finally {
-    loadingExploits.value = false
   }
 }
 
-async function doCheck(exp: ExploitInfo) {
-  if (!requireTarget()) return
-  executingExploit.value = true
-  try {
-    const resp = await triggerExploit({
-      target: targetForm.value.target.trim(),
-      exploit_id: exp.id,
-      mode: 'check',
-    })
-    exploitResult.value = resp
-    exploitResultMode.value = 'check'
-    ElMessage.success(`Check completed: ${exp.id}`)
-  } catch (e: any) {
-    ElMessage.error(e.message)
-  } finally {
-    executingExploit.value = false
+function severityTag(severity: string) {
+  const map: Record<string, string> = {
+    critical: 'danger',
+    high: 'danger',
+    medium: 'warning',
+    low: 'info'
   }
+  return map[severity.toLowerCase()] || 'info'
 }
 
-async function doExploit(exp: ExploitInfo) {
-  if (!requireTarget()) return
-  executingExploit.value = true
-  try {
-    const payload: any = {
-      target: targetForm.value.target.trim(),
-      exploit_id: exp.id,
-      mode: 'execute',
-    }
-    if (exp.supports_command) {
-      payload.command = exp.default_command || 'id'
-    }
-    const resp = await triggerExploit(payload)
-    exploitResult.value = resp
-    exploitResultMode.value = 'execute'
-    ElMessage.success(`Exploit executed: ${exp.id}`)
-  } catch (e: any) {
-    ElMessage.error(e.message)
-  } finally {
-    executingExploit.value = false
-  }
+function checkExploit(exploit: ExploitInfo) {
+  ElMessage.info(`Check exploit: ${exploit.name}`)
 }
 
-function formatResultValue(value: unknown) {
-  if (value === undefined || value === null || value === '') return '-'
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  return String(value)
+function runExploit(exploit: ExploitInfo) {
+  ElMessage.warning(`Run exploit: ${exploit.name}`)
 }
 
-function formatConfidence(value: unknown) {
-  if (typeof value !== 'number') return '-'
-  return value.toFixed(2)
-}
-
-function exploitStatusTag(status: string): string {
-  if (status === 'succeeded' || status === 'success') return 'success'
-  if (status === 'failed' || status === 'error') return 'danger'
-  if (status === 'running' || status === 'accepted') return 'warning'
-  return 'info'
-}
-
-function runStatusTag(status: string): string {
-  return status === 'succeeded' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'warning' : 'info'
-}
-
-function nodeStatusTag(status: string): string {
-  return status === 'succeeded' ? 'success' : status === 'failed' ? 'danger' : status === 'skipped' ? 'warning' : status === 'running' ? '' : 'info'
-}
-
-function taskStatusTag(status: string): string {
-  return status === 'done' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'warning' : status === 'skipped' ? 'info' : 'info'
-}
-
-function taskTagType(type: string): string {
-  if (type.includes('nuclei') || type.includes('exploit')) return 'danger'
-  if (type.includes('nmap') || type.includes('fscan')) return 'warning'
-  if (type.includes('path') || type.includes('http')) return 'success'
-  return 'info'
-}
-
-function categoryTagType(category?: string): string {
-  if (!category) return ''
-  if (category === 'vuln_scan' || category === 'exploit') return 'danger'
-  if (category === 'port_scan' || category === 'host_discovery') return 'warning'
-  if (category === 'path_scan' || category === 'web') return 'success'
-  return 'info'
-}
-
-function formatDate(iso: string) {
-  if (!iso) return '-'
-  return new Date(iso).toLocaleString()
-}
-
-onMounted(() => {
-  void (async () => {
-    await Promise.all([loadWorkflowState(), loadExploits()])
-    if (!scanStore.currentRunId) {
-      await scanStore.loadLatestRun()
-    }
-    if (scanStore.currentRunId) {
-      await refreshCurrentRun()
-    } else {
-      await scanStore.loadTasks()
-    }
-  })()
-
-  unsubscribe = sseStore.onEvent((event) => {
-    if (!scanStore.currentRunId || event.run_id !== scanStore.currentRunId) return
-    if (['run_started', 'node_started', 'node_finished', 'run_finished', 'scan_error'].includes(event.type)) {
-      void refreshCurrentRun()
-    }
-  })
-})
-
-onBeforeUnmount(() => {
-  unsubscribe?.()
+onMounted(async () => {
+  await loadTarget()
+  await restoreLatestScan()
+  await loadExploits()
 })
 </script>
 
 <style scoped>
-.target-workspace h1 {
-  color: #e5e5e5;
+.target-workspace {
+  padding: 20px;
+}
+
+.workspace-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.header-left h1 {
+  color: #e5e5e5;
+  margin: 0;
+}
+
+.workspace-tabs {
+  margin-top: 20px;
 }
 
 .workspace-card {
   margin-bottom: 20px;
 }
 
-.workflow-meta {
+.card-header {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.workflow-description {
-  color: #909399;
-  font-size: 13px;
-}
-
-.workflow-preset-compact {
-  width: 100%;
-}
-
-.section-title-row {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  width: 100%;
-  gap: 12px;
-}
-
-.section-title-left {
-  display: flex;
   align-items: center;
-  gap: 8px;
 }
 
-.section-title {
-  font-weight: 600;
-  color: #e5e5e5;
+.stat-cards {
+  margin-top: 20px;
 }
 
-.section-description {
-  color: #909399;
-  font-size: 12px;
+.stat-card {
+  padding: 20px;
+  background: #1a1a1a;
+  border: 1px solid #303030;
+  border-radius: 8px;
+  text-align: center;
+  transition: all 0.3s;
 }
 
-.section-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 8px 0 4px;
+.stat-card:hover {
+  border-color: #409eff;
+  transform: translateY(-2px);
 }
 
-.section-preset-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.section-empty {
-  padding: 16px 0;
-}
-
-.preset-panel {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  padding: 12px;
-  transition: all 0.2s ease;
-}
-
-.preset-panel:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
-.preset-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 12px;
-}
-
-.preset-title-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-}
-
-.preset-node-id {
-  font-weight: 500;
-  color: #e5e5e5;
-}
-
-.preset-description {
-  color: #909399;
-  font-size: 13px;
-  line-height: 1.5;
-  margin-bottom: 12px;
-}
-
-.preset-command-block {
-  margin-bottom: 12px;
-}
-
-.preset-command-label {
-  color: #c0c4cc;
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 6px;
-}
-
-.preset-command {
-  margin: 0;
-  padding: 12px;
-  border-radius: 6px;
-  background: #0d0d0d;
-  color: #a0cfff;
-  font-family: 'Consolas', 'Fira Code', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.preset-params {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.preset-param {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.preset-param-label {
-  color: #c0c4cc;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.preset-param-hint {
-  color: #909399;
-  font-size: 12px;
-}
-
-.capability-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.exploit-result-section {
-  margin-top: 16px;
-}
-
-.exploit-result-title {
-  color: #c0c4cc;
-  font-size: 13px;
-  font-weight: 600;
+.stat-number {
+  font-size: 36px;
+  font-weight: bold;
+  color: #409eff;
+  text-align: center;
   margin-bottom: 8px;
 }
 
-.cmd-text {
-  font-family: 'Consolas', 'Fira Code', monospace;
-  font-size: 12px;
-  color: #a0cfff;
-  word-break: break-all;
-  white-space: pre-wrap;
+.stat-number.has-vulns {
+  color: #f56c6c;
 }
 
-.cmd-na {
-  color: #606266;
-}
-
-.result-output {
-  margin: 0;
-  background: #0d0d0d;
-  color: #d4d7de;
-  padding: 16px;
-  border-radius: 4px;
-  font-family: monospace;
+.stat-label {
   font-size: 13px;
-  line-height: 1.6;
-  max-height: 420px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
+  color: #909399;
+  text-align: center;
 }
 
-.workspace-alert {
-  margin-top: 16px;
-}
-
-.output-title {
-  width: 100%;
+.host-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  width: 100%;
+}
+
+.host-domain {
+  color: #909399;
+  font-size: 13px;
+}
+
+.host-badges {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-label {
+  font-size: 12px;
+  color: #909399;
+  margin-right: 12px;
+}
+
+.vuln-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .empty-hint {
-  color: #606266;
   text-align: center;
-  padding: 30px;
+  padding: 40px;
+  color: #909399;
 }
 </style>

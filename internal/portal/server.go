@@ -125,6 +125,10 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL str
 	if err != nil {
 		return nil, err
 	}
+	runStore, err := storage.NewFileStore(filepath.Join(".penframe"))
+	if err != nil {
+		return nil, err
+	}
 
 	server := &Server{
 		toolsPath:    toolsPath,
@@ -133,7 +137,7 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL str
 		tools:        tools,
 		workflow:     wf,
 		runner:       runner,
-		store:        storage.NewMemoryStore(),
+		store:        runStore,
 		events:       newEventBroker(),
 		mux:          http.NewServeMux(),
 		assets:       asset.NewStore(),
@@ -176,7 +180,18 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("/api/scan/", s.handleScanAction)
 	s.mux.HandleFunc("/api/tasks", s.handleTasks)
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
-	s.mux.HandleFunc("/api/projects/", s.handleDeleteProject)
+	s.mux.HandleFunc("/api/projects/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.Contains(path, "/targets") {
+			if strings.HasSuffix(path, "/targets") { // /api/projects/{id}/targets
+				s.handleProjectTargets(w, r)
+			} else { // /api/projects/{id}/targets/{tid}
+				s.handleProjectTarget(w, r)
+			}
+		} else {
+			s.handleDeleteProject(w, r)
+		}
+	})
 	s.mux.HandleFunc("/api/exploit", s.handleExploit)
 	s.mux.HandleFunc("/api/exploits", s.handleExploitsList)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
@@ -223,7 +238,13 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 	observedCtx := workflow.WithEventObserver(ctx, workflow.EventObserverFunc(func(event workflow.Event) {
 		if event.Summary != nil {
-			s.store.Save(runID, *event.Summary)
+			storedRun, ok := s.store.GetStoredRun(runID)
+			if ok {
+				storedRun.Summary = *event.Summary
+				_ = s.store.SaveRun(storedRun)
+			} else {
+				_ = s.store.Save(runID, *event.Summary)
+			}
 		}
 		s.events.Publish(newStreamEvent(runID, event))
 	}))
@@ -236,7 +257,10 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		ID:      runID,
 		Summary: summary,
 	}
-	s.store.Save(run.ID, run.Summary)
+	if err := s.store.SaveRun(run); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("save run: %w", err))
+		return
+	}
 	response := runResponse{Run: run}
 	if runErr != nil {
 		response.Error = runErr.Error()
@@ -376,7 +400,15 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		limit = parsedLimit
 	}
 
-	writeJSON(w, http.StatusOK, runsResponse{Runs: s.store.List(limit)})
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	targetID := strings.TrimSpace(r.URL.Query().Get("target_id"))
+
+	runs := s.store.List(limit)
+	if projectID != "" || targetID != "" {
+		runs = s.store.ListByFilter(projectID, targetID, limit)
+	}
+
+	writeJSON(w, http.StatusOK, runsResponse{Runs: runs})
 }
 
 func (s *Server) handleRunByID(w http.ResponseWriter, r *http.Request) {

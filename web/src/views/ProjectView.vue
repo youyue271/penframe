@@ -8,10 +8,7 @@
       </template>
       <el-form :inline="true" @submit.prevent="addProject">
         <el-form-item label="Name">
-          <el-input v-model="form.name" placeholder="e.g. Dify staging" clearable />
-        </el-form-item>
-        <el-form-item label="URL">
-          <el-input v-model="form.url" placeholder="https://target.example" clearable style="width: 320px" />
+          <el-input v-model="form.name" placeholder="e.g. Dify staging" clearable style="width: 320px" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" native-type="submit" :loading="adding">Add</el-button>
@@ -27,9 +24,13 @@
         </div>
       </template>
 
-      <el-table v-loading="loading" :data="projects" size="small" stripe style="width: 100%">
-        <el-table-column prop="name" label="Name" width="220" />
-        <el-table-column prop="url" label="URL / Target" show-overflow-tooltip />
+      <el-table v-loading="loading" :data="projects" size="small" stripe style="width: 100%" @row-click="openProject">
+        <el-table-column prop="name" label="Name" width="300" />
+        <el-table-column label="Targets" width="120">
+          <template #default="{ row }">
+            {{ row.targets?.length || 0 }}
+          </template>
+        </el-table-column>
         <el-table-column label="Created" width="190">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
@@ -37,9 +38,9 @@
         </el-table-column>
         <el-table-column label="Actions" width="120" fixed="right">
           <template #default="{ row }">
-            <el-popconfirm title="Delete this project?" @confirm="removeProject(row.id)">
+            <el-popconfirm title="Delete this project?" @confirm.stop="removeProject(row.id)">
               <template #reference>
-                <el-button size="small" type="danger" :loading="deletingId === row.id">Delete</el-button>
+                <el-button size="small" type="danger" :loading="deletingId === row.id" @click.stop>Delete</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -55,14 +56,16 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createProject, deleteProject, listProjects, type Project } from '@/api/project'
 
+const router = useRouter()
 const projects = ref<Project[]>([])
 const loading = ref(false)
 const adding = ref(false)
 const deletingId = ref('')
-const form = ref({ name: '', url: '' })
+const form = ref({ name: '' })
 
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString() : '-'
@@ -82,23 +85,26 @@ async function loadProjects() {
 
 async function addProject() {
   const name = form.value.name.trim()
-  const url = form.value.url.trim()
-  if (!name || !url) {
-    ElMessage.warning('Name and URL are required')
+  if (!name) {
+    ElMessage.warning('Name is required')
     return
   }
 
   adding.value = true
   try {
-    const created = await createProject(name, url)
+    const created = await createProject(name)
     projects.value = [...projects.value, created]
-    form.value = { name: '', url: '' }
+    form.value = { name: '' }
     ElMessage.success('Project added')
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {
     adding.value = false
   }
+}
+
+function openProject(row: Project) {
+  router.push(`/projects/${row.id}`)
 }
 
 async function removeProject(id: string) {

@@ -23,6 +23,19 @@ export async function post<T>(path: string, body?: any): Promise<T> {
   return resp.json()
 }
 
+export async function put<T>(path: string, body?: any): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`PUT ${path} failed: ${resp.status} - ${text}`)
+  }
+  return resp.json()
+}
+
 export async function del(path: string): Promise<void> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'DELETE',
