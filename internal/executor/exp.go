@@ -64,11 +64,14 @@ func (e ExpExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ do
 	}
 
 	payload := expRequest{
-		Executor: inputStr(renderedInputs, "executor_name"),
+		Executor: inputStr(renderedInputs, "exploit_id"),
 		Target:   target,
 		Entry:    entry,
 		Finding:  inputStr(renderedInputs, "finding"),
 		Command:  inputStr(renderedInputs, "command"),
+	}
+	if payload.Executor == "" {
+		payload.Executor = inputStr(renderedInputs, "executor_name")
 	}
 	if payload.Executor == "" {
 		payload.Executor = "auto"

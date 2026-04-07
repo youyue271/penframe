@@ -210,7 +210,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getProjectTargets, type Target } from '@/api/target'
 import { fetchLatestTargetRun, startScan as startScanAPI } from '@/api/scan'
-import { listExploits, type ExploitInfo } from '@/api/exploit'
+import { listExploits, triggerExploit, type ExploitInfo } from '@/api/exploit'
 import { useAssetStore } from '@/stores/asset'
 
 const route = useRoute()
@@ -264,8 +264,37 @@ function viewPortDetails(host: any, port: any) {
   ElMessage.info(`Port ${port.port} on ${host.ip}`)
 }
 
-function exploitVuln(vuln: any) {
-  ElMessage.warning(`Exploit: ${vuln.name}`)
+async function exploitVuln(vuln: any) {
+  if (!currentTarget.value) {
+    ElMessage.warning('No target selected')
+    return
+  }
+
+  try {
+    const result = await triggerExploit({
+      target: vuln.target || currentTarget.value.url,
+      exploit_id: vuln.exploit_id || 'auto',
+      mode: 'execute',
+      command: 'id',
+      project_id: projectId.value,
+      target_id: targetId.value
+    })
+
+    if (result.result?.success) {
+      ElMessage.success({
+        message: `Exploit successful! Output: ${result.result.output || 'Command executed'}`,
+        duration: 5000
+      })
+    } else {
+      const detail = result.result?.detail || result.message || 'No output detected'
+      ElMessage.warning({
+        message: `Exploit attempted but no confirmed output: ${detail}`,
+        duration: 5000
+      })
+    }
+  } catch (e: any) {
+    ElMessage.error(`Exploit failed: ${e.message}`)
+  }
 }
 
 function goBack() {
@@ -352,12 +381,55 @@ function severityTag(severity: string) {
   return map[severity.toLowerCase()] || 'info'
 }
 
-function checkExploit(exploit: ExploitInfo) {
-  ElMessage.info(`Check exploit: ${exploit.name}`)
+async function checkExploit(exploit: ExploitInfo) {
+  if (!currentTarget.value) {
+    ElMessage.warning('No target selected')
+    return
+  }
+
+  try {
+    const result = await triggerExploit({
+      target: currentTarget.value.url,
+      exploit_id: exploit.id,
+      mode: 'check',
+      project_id: projectId.value,
+      target_id: targetId.value
+    })
+
+    if (result.result?.vulnerable) {
+      ElMessage.success(`Vulnerable! ${result.result.detail || ''}`)
+    } else {
+      ElMessage.info(`Not vulnerable: ${result.result?.detail || 'Check completed'}`)
+    }
+  } catch (e: any) {
+    ElMessage.error(`Check failed: ${e.message}`)
+  }
 }
 
-function runExploit(exploit: ExploitInfo) {
-  ElMessage.warning(`Run exploit: ${exploit.name}`)
+async function runExploit(exploit: ExploitInfo) {
+  if (!currentTarget.value) {
+    ElMessage.warning('No target selected')
+    return
+  }
+
+  try {
+    const result = await triggerExploit({
+      target: currentTarget.value.url,
+      exploit_id: exploit.id,
+      mode: 'execute',
+      command: 'id',
+      project_id: projectId.value,
+      target_id: targetId.value
+    })
+
+    if (result.result?.success) {
+      ElMessage.success(`Exploit successful! Output: ${result.result.output || ''}`)
+    } else {
+      ElMessage.warning(`Exploit failed: ${result.result?.detail || result.message || 'No output'}`)
+    }
+  } catch (e: any) {
+    ElMessage.error(`Exploit failed: ${e.message}`)
+  }
 }
 
 onMounted(async () => {
