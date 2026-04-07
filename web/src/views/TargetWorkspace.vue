@@ -142,10 +142,25 @@
           <template #header>
             <div class="card-header">
               <span>Vulnerabilities</span>
-              <el-tag type="danger">{{ allVulnerabilities.length }} found</el-tag>
+              <el-tag type="danger">{{ allVulnerabilities.length }} groups / {{ vulnerabilityHitCount }} hits</el-tag>
             </div>
           </template>
-          <el-table :data="allVulnerabilities" size="small" stripe>
+          <el-table :data="allVulnerabilities" row-key="id" size="small" stripe>
+            <el-table-column type="expand" width="56">
+              <template #default="{ row }">
+                <div class="vuln-group-expand">
+                  <div class="vuln-group-expand-title">Matched URLs</div>
+                  <div class="vuln-hit-list">
+                    <div v-for="hit in row.hits" :key="hit.id" class="vuln-hit-item">
+                      <el-tag size="small" :type="vulnSeverityType(hit.severity)">
+                        {{ hitLabel(hit) }}
+                      </el-tag>
+                      <span class="vuln-hit-target">{{ hit.target }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="Severity" width="100">
               <template #default="{ row }">
                 <el-tag size="small" :type="vulnSeverityType(row.severity)">
@@ -153,8 +168,13 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="Name" width="200" />
-            <el-table-column prop="target" label="Target" show-overflow-tooltip />
+            <el-table-column prop="name" label="Name" min-width="260" show-overflow-tooltip />
+            <el-table-column prop="target" label="Target" min-width="280" show-overflow-tooltip />
+            <el-table-column label="Hits" width="80">
+              <template #default="{ row }">
+                <el-tag size="small" type="info">{{ row.hits.length }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="Exploitable" width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.exp_available" size="small" type="danger">Yes</el-tag>
@@ -225,21 +245,137 @@ const scanning = ref(false)
 const scanResult = ref<any>(null)
 const exploits = ref<ExploitInfo[]>([])
 
-const allVulnerabilities = computed(() => {
-  const vulns: any[] = []
+type VulnerabilityHit = {
+  id: string
+  name: string
+  severity: string
+  exp_available: boolean
+  target: string
+  site: string
+  host: string
+  port: number
+  path: string
+}
+
+type VulnerabilityGroup = {
+  id: string
+  name: string
+  severity: string
+  exp_available: boolean
+  target: string
+  exploit_target: string
+  hits: VulnerabilityHit[]
+}
+
+function normalizeVulnPath(path?: string): string {
+  return path && path.trim() ? path : '/'
+}
+
+function currentTargetOrigin(): string {
+  const raw = currentTarget.value?.url || ''
+  if (!raw) return ''
+  try {
+    return new URL(raw).origin
+  } catch {
+    return raw.replace(/\/+$/, '')
+  }
+}
+
+function buildVulnTarget(site: string, path: string): string {
+  if (site.startsWith('http://') || site.startsWith('https://')) {
+    return `${site}${path === '/' ? '' : path}`
+  }
+  return `${site}${path}`
+}
+
+const rawVulnerabilityHits = computed<VulnerabilityHit[]>(() => {
+  const vulns: VulnerabilityHit[] = []
+  const site = currentTargetOrigin()
+
   assetStore.hosts.forEach((host: any) => {
     host.ports?.forEach((port: any) => {
+      const fallbackSite = `${host.ip}:${port.port}`
+      const vulnSite = site || fallbackSite
+
       port.vulns?.forEach((vuln: any) => {
-        vulns.push({ ...vuln, host: host.ip, port: port.port })
+        const path = '/'
+        vulns.push({
+          id: vuln.id,
+          name: vuln.name,
+          severity: vuln.severity,
+          exp_available: vuln.exp_available,
+          target: buildVulnTarget(vulnSite, path),
+          site: vulnSite,
+          host: host.ip,
+          port: port.port,
+          path,
+        })
       })
-      port.paths?.forEach((path: any) => {
-        path.vulns?.forEach((vuln: any) => {
-          vulns.push({ ...vuln, host: host.ip, port: port.port, path: path.path })
+
+      port.paths?.forEach((pathItem: any) => {
+        pathItem.vulns?.forEach((vuln: any) => {
+          const path = normalizeVulnPath(pathItem.path)
+          vulns.push({
+            id: vuln.id,
+            name: vuln.name,
+            severity: vuln.severity,
+            exp_available: vuln.exp_available,
+            target: buildVulnTarget(vulnSite, path),
+            site: vulnSite,
+            host: host.ip,
+            port: port.port,
+            path,
+          })
         })
       })
     })
   })
+
   return vulns
+})
+
+const vulnerabilityHitCount = computed(() => rawVulnerabilityHits.value.length)
+
+const allVulnerabilities = computed<VulnerabilityGroup[]>(() => {
+  const groups = new Map<string, VulnerabilityGroup>()
+
+  rawVulnerabilityHits.value.forEach((hit) => {
+    const key = `${hit.site}::${hit.name}`
+    const existing = groups.get(key)
+    if (existing) {
+      existing.hits.push(hit)
+      existing.exp_available = existing.exp_available || hit.exp_available
+      return
+    }
+
+    groups.set(key, {
+      id: key,
+      name: hit.name,
+      severity: hit.severity,
+      exp_available: hit.exp_available,
+      target: hit.target,
+      exploit_target: hit.target,
+      hits: [hit],
+    })
+  })
+
+  return Array.from(groups.values())
+    .map((group) => {
+      const sortedHits = [...group.hits].sort((a, b) => a.path.localeCompare(b.path))
+      const first = sortedHits[0]
+      const firstPath = first?.path || '/'
+      const summaryTarget = sortedHits.length === 1
+        ? first.target
+        : `${first.site}${firstPath === '/' ? '' : firstPath} (+${sortedHits.length - 1} paths)`
+
+      return {
+        ...group,
+        target: summaryTarget,
+        exploit_target: first.target,
+        hits: sortedHits,
+      }
+    })
+    .sort((a, b) => b.hits.length - a.hits.length || a.name.localeCompare(b.name))
 })
 
 function countHostVulns(host: any): number {
@@ -272,7 +408,7 @@ async function exploitVuln(vuln: any) {
 
   try {
     const result = await triggerExploit({
-      target: vuln.target || currentTarget.value.url,
+      target: vuln.exploit_target || vuln.target || currentTarget.value.url,
       exploit_id: vuln.exploit_id || 'auto',
       mode: 'execute',
       command: 'id',
@@ -379,6 +515,10 @@ function severityTag(severity: string) {
     low: 'info'
   }
   return map[severity.toLowerCase()] || 'info'
+}
+
+function hitLabel(hit: VulnerabilityHit): string {
+  return hit.path === '/' ? '/' : hit.path
 }
 
 async function checkExploit(exploit: ExploitInfo) {
@@ -541,6 +681,35 @@ onMounted(async () => {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.vuln-group-expand {
+  padding: 8px 12px;
+}
+
+.vuln-group-expand-title {
+  margin-bottom: 8px;
+  color: #c0c4cc;
+  font-size: 12px;
+}
+
+.vuln-hit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vuln-hit-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vuln-hit-target {
+  color: #909399;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .empty-hint {
