@@ -70,8 +70,8 @@
             </el-col>
             <el-col :span="6">
               <div class="stat-card">
-                <div class="stat-number" :class="{ 'has-vulns': assetStore.summary.vulns > 0 }">
-                  {{ assetStore.summary.vulns }}
+                <div class="stat-number" :class="{ 'has-vulns': exploitableVulnerabilityCount > 0 }">
+                  {{ exploitableVulnerabilityCount }}
                 </div>
                 <div class="stat-label">Vulnerabilities</div>
               </div>
@@ -116,7 +116,7 @@
                   <template #default="{ row }">
                     <div v-if="row.vulns && row.vulns.length > 0" class="vuln-tags">
                       <el-tag v-for="vuln in row.vulns.slice(0, 2)" :key="vuln.id"
-                        size="small" :type="vulnSeverityType(vuln.severity)">
+                        size="small" :type="vulnSeverityType(classifyVulnerability(vuln))">
                         {{ vuln.name }}
                       </el-tag>
                       <el-tag v-if="row.vulns.length > 2" size="small" type="info">
@@ -142,7 +142,7 @@
           <template #header>
             <div class="card-header">
               <span>Vulnerabilities</span>
-              <el-tag type="danger">{{ allVulnerabilities.length }} groups / {{ vulnerabilityHitCount }} hits</el-tag>
+              <el-tag type="danger">{{ exploitableVulnerabilityCount }} exploitable</el-tag>
             </div>
           </template>
           <el-table :data="allVulnerabilities" row-key="id" size="small" stripe>
@@ -164,13 +164,13 @@
             <el-table-column label="Severity" width="100">
               <template #default="{ row }">
                 <el-tag size="small" :type="vulnSeverityType(row.severity)">
-                  {{ row.severity || 'unknown' }}
+                  {{ severityLabel(row.severity) }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="name" label="Name" min-width="260" show-overflow-tooltip />
             <el-table-column prop="target" label="Target" min-width="280" show-overflow-tooltip />
-            <el-table-column label="Hits" width="80">
+            <el-table-column label="Paths" width="80">
               <template #default="{ row }">
                 <el-tag size="small" type="info">{{ row.hits.length }}</el-tag>
               </template>
@@ -245,22 +245,26 @@ const scanning = ref(false)
 const scanResult = ref<any>(null)
 const exploits = ref<ExploitInfo[]>([])
 
+type VulnerabilityLevel = 'severity' | 'warning' | 'info'
+
 type VulnerabilityHit = {
   id: string
   name: string
-  severity: string
+  severity: VulnerabilityLevel
   exp_available: boolean
   target: string
   site: string
   host: string
   port: number
   path: string
+  cve?: string
+  detail?: string
 }
 
 type VulnerabilityGroup = {
   id: string
   name: string
-  severity: string
+  severity: VulnerabilityLevel
   exp_available: boolean
   target: string
   exploit_target: string
@@ -288,6 +292,41 @@ function buildVulnTarget(site: string, path: string): string {
   return `${site}${path}`
 }
 
+function classifyVulnerability(vuln: {
+  severity?: string
+  exp_available?: boolean
+  name?: string
+  cve?: string
+  detail?: string
+}): VulnerabilityLevel {
+  if (vuln.exp_available) return 'severity'
+
+  const text = `${vuln.name || ''} ${vuln.cve || ''} ${vuln.detail || ''}`.toLowerCase()
+  if (/(disclosure|exposure|exposed|leak|leakage|sensitive|secret|credential|token|dump|directory listing|file read|source code|config|env\b)/.test(text)) {
+    return 'warning'
+  }
+  if (/(fingerprint|framework|technology|tech stack|surface detection|http fingerprint|react|next\.js|vue|angular|nuxt|laravel|spring|django|flask|wordpress|apache|nginx)/.test(text)) {
+    return 'info'
+  }
+
+  const severity = (vuln.severity || '').toLowerCase()
+  if (severity === 'critical' || severity === 'high') return 'severity'
+  if (severity === 'medium') return 'warning'
+  return 'info'
+}
+
+function severityRank(level: VulnerabilityLevel): number {
+  if (level === 'severity') return 3
+  if (level === 'warning') return 2
+  return 1
+}
+
+function highestSeverity(levels: VulnerabilityLevel[]): VulnerabilityLevel {
+  return levels.reduce<VulnerabilityLevel>((highest, current) => {
+    return severityRank(current) > severityRank(highest) ? current : highest
+  }, 'info')
+}
+
 const rawVulnerabilityHits = computed<VulnerabilityHit[]>(() => {
   const vulns: VulnerabilityHit[] = []
   const site = currentTargetOrigin()
@@ -296,19 +335,26 @@ const rawVulnerabilityHits = computed<VulnerabilityHit[]>(() => {
     host.ports?.forEach((port: any) => {
       const fallbackSite = `${host.ip}:${port.port}`
       const vulnSite = site || fallbackSite
+      const pathsById = new Map<string, string>()
+
+      port.paths?.forEach((pathItem: any) => {
+        pathsById.set(pathItem.id, normalizeVulnPath(pathItem.path))
+      })
 
       port.vulns?.forEach((vuln: any) => {
-        const path = '/'
+        const path = normalizeVulnPath(pathsById.get(vuln.path_id))
         vulns.push({
           id: vuln.id,
           name: vuln.name,
-          severity: vuln.severity,
+          severity: classifyVulnerability(vuln),
           exp_available: vuln.exp_available,
           target: buildVulnTarget(vulnSite, path),
           site: vulnSite,
           host: host.ip,
           port: port.port,
           path,
+          cve: vuln.cve,
+          detail: vuln.detail,
         })
       })
 
@@ -318,13 +364,15 @@ const rawVulnerabilityHits = computed<VulnerabilityHit[]>(() => {
           vulns.push({
             id: vuln.id,
             name: vuln.name,
-            severity: vuln.severity,
+            severity: classifyVulnerability(vuln),
             exp_available: vuln.exp_available,
             target: buildVulnTarget(vulnSite, path),
             site: vulnSite,
             host: host.ip,
             port: port.port,
             path,
+            cve: vuln.cve,
+            detail: vuln.detail,
           })
         })
       })
@@ -334,16 +382,17 @@ const rawVulnerabilityHits = computed<VulnerabilityHit[]>(() => {
   return vulns
 })
 
-const vulnerabilityHitCount = computed(() => rawVulnerabilityHits.value.length)
-
 const allVulnerabilities = computed<VulnerabilityGroup[]>(() => {
   const groups = new Map<string, VulnerabilityGroup>()
 
   rawVulnerabilityHits.value.forEach((hit) => {
     const key = `${hit.site}::${hit.name}`
+    const hitKey = `${hit.target}::${hit.path}`
     const existing = groups.get(key)
     if (existing) {
-      existing.hits.push(hit)
+      if (!existing.hits.some((item) => `${item.target}::${item.path}` === hitKey)) {
+        existing.hits.push(hit)
+      }
       existing.exp_available = existing.exp_available || hit.exp_available
       return
     }
@@ -361,7 +410,7 @@ const allVulnerabilities = computed<VulnerabilityGroup[]>(() => {
 
   return Array.from(groups.values())
     .map((group) => {
-      const sortedHits = [...group.hits].sort((a, b) => a.path.localeCompare(b.path))
+      const sortedHits = [...group.hits].sort((a, b) => a.path.localeCompare(b.path) || a.target.localeCompare(b.target))
       const first = sortedHits[0]
       const firstPath = first?.path || '/'
       const summaryTarget = sortedHits.length === 1
@@ -370,12 +419,23 @@ const allVulnerabilities = computed<VulnerabilityGroup[]>(() => {
 
       return {
         ...group,
+        severity: highestSeverity(sortedHits.map((hit) => hit.severity)),
         target: summaryTarget,
         exploit_target: first.target,
         hits: sortedHits,
       }
     })
     .sort((a, b) => b.hits.length - a.hits.length || a.name.localeCompare(b.name))
+})
+
+const vulnerabilityHitCount = computed(() => {
+  return allVulnerabilities.value.reduce((count, group) => count + group.hits.length, 0)
+})
+
+const exploitableVulnerabilityCount = computed(() => {
+  return allVulnerabilities.value
+    .filter((group) => group.exp_available)
+    .reduce((count, group) => count + group.hits.length, 0)
 })
 
 function countHostVulns(host: any): number {
@@ -389,10 +449,17 @@ function countHostVulns(host: any): number {
   return count
 }
 
+function severityLabel(severity: string): string {
+  const s = (severity || '').toLowerCase()
+  if (s === 'severity') return 'Severity'
+  if (s === 'warning') return 'Warning'
+  return 'Info'
+}
+
 function vulnSeverityType(severity: string): string {
   const s = (severity || '').toLowerCase()
-  if (s === 'critical' || s === 'high') return 'danger'
-  if (s === 'medium') return 'warning'
+  if (s === 'severity' || s === 'critical' || s === 'high') return 'danger'
+  if (s === 'warning' || s === 'medium') return 'warning'
   return 'info'
 }
 

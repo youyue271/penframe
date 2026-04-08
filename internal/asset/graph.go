@@ -2,6 +2,8 @@ package asset
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 	"sync/atomic"
 
 	"penframe/internal/domain"
@@ -191,6 +193,70 @@ func (g *Graph) VulnCount() int {
 	return count
 }
 
+// ExploitableVulnPathCount returns the deduplicated number of exploitable vulnerability paths.
+func (g *Graph) ExploitableVulnPathCount() int {
+	type vulnSummaryGroup struct {
+		expAvailable bool
+		hits         map[string]struct{}
+	}
+
+	groups := make(map[string]*vulnSummaryGroup)
+	targetSite := g.targetSite()
+
+	for _, h := range g.Hosts {
+		for _, p := range h.Ports {
+			hitSite := targetSite
+			if hitSite == "" {
+				hitSite = fmt.Sprintf("%s:%d", h.IP, p.Port)
+			}
+
+			for i := range p.Vulns {
+				v := &p.Vulns[i]
+				groupKey := hitSite + "::" + v.Name
+				hitKey := hitSite + "::" + g.vulnPath(v.PathID)
+				group, ok := groups[groupKey]
+				if !ok {
+					group = &vulnSummaryGroup{hits: make(map[string]struct{})}
+					groups[groupKey] = group
+				}
+				group.hits[hitKey] = struct{}{}
+				group.expAvailable = group.expAvailable || v.ExpAvail
+			}
+		}
+	}
+
+	count := 0
+	for _, group := range groups {
+		if group.expAvailable {
+			count += len(group.hits)
+		}
+	}
+	return count
+}
+
+func (g *Graph) targetSite() string {
+	raw := strings.TrimSpace(g.TargetRaw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
+	}
+	return strings.TrimRight(strings.ToLower(raw), "/")
+}
+
+func (g *Graph) vulnPath(pathID string) string {
+	if pathID == "" {
+		return "/"
+	}
+	path, ok := g.pathIndex[pathID]
+	if !ok || strings.TrimSpace(path.Path) == "" {
+		return "/"
+	}
+	return path.Path
+}
+
 // ToCytoscapeJSON exports the graph in Cytoscape.js compatible format.
 func (g *Graph) ToCytoscapeJSON() []CytoscapeElement {
 	var elements []CytoscapeElement
@@ -334,7 +400,7 @@ func (g *Graph) Summary() map[string]int {
 		"hosts": g.HostCount(),
 		"ports": g.PortCount(),
 		"paths": g.PathCount(),
-		"vulns": g.VulnCount(),
+		"vulns": g.ExploitableVulnPathCount(),
 	}
 }
 
