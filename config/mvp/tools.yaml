@@ -1,0 +1,209 @@
+tools:
+  chain_start:
+    category: orchestration
+    description: 自动工具链起始节点，用于触发条件分支。
+    command_template: "echo \"chain_start target={{ .inputs.target }}\""
+  asset_seed:
+    category: discovery
+    description: 初始化当前任务的资产种子，沉淀 scope、host 和入口，作为后续资产测绘的起点。
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then printf 'SCOPE target={{ .inputs.target }}\nHOST host={{ .inputs.host }} hostport={{ .inputs.hostport }} origin={{ .inputs.origin }}\nENTRY url={{ .inputs.entry }} kind=seed source=target\n'; else printf 'SKIPPED stage=asset_seed enabled=false\n'; fi"
+    parser: parsers/asset_seed.yaml
+    variables:
+      - name: enabled
+        required: false
+        default: "true"
+        description: 是否执行当前阶段。
+      - name: target
+        required: true
+        description: 当前任务原始目标。
+      - name: host
+        required: true
+        description: 目标主机名或 IP。
+      - name: hostport
+        required: true
+        description: 目标 host:port。
+      - name: origin
+        required: true
+        description: 目标源地址。
+      - name: entry
+        required: true
+        description: 初始入口 URL。
+  curl_fetch:
+    category: web
+    description: 抓取页面与响应头，适合授权靶场中的入口探测和前端配置指纹提取；配合 http 执行器时走原生 HTTP 请求。
+    command_template: "curl -k -sSL --max-time {{ .inputs.max_time }} -D \"{{ .inputs.headers_file }}\" -o \"{{ .inputs.body_file }}\" {{ .inputs.extra_args }} \"{{ .inputs.url }}\""
+    parser: parsers/http_probe.yaml
+    variables:
+      - name: url
+        required: true
+        description: 需要抓取的完整 URL。
+      - name: max_time
+        required: false
+        default: "15"
+        description: curl 最大耗时，单位秒。
+      - name: headers_file
+        required: true
+        description: 响应头输出文件。
+      - name: body_file
+        required: true
+        description: 响应体输出文件。
+      - name: extra_args
+        required: false
+        default: ""
+        description: 额外 curl 参数。
+    metadata:
+      source: native-http
+  service_discovery:
+    category: discovery
+    description: 基于 fixture 的发现节点，用于安全 MVP 演示。
+    command_template: "scanner --target {{ .inputs.target }}"
+    parser: parsers/service_discovery.yaml
+    variables:
+      - name: target
+        required: true
+        description: 需要枚举的 CIDR 或主机列表。
+  asset_enrichment:
+    category: enrichment
+    description: 基于 fixture 的资产增强节点，用于安全 MVP 演示。
+    command_template: "enricher --http-count {{ .inputs.http_count }}"
+    parser: parsers/asset_enrichment.yaml
+
+  nmap_scan:
+    category: discovery
+    description: 从本地工具目录导入的 nmap 扫描模板，可配合 local 执行器在 WSL 中通过 powershell.exe 执行。
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe\" {{ .inputs.extra_args }} {{ .inputs.target }}; else printf 'SKIPPED stage=nmap_scan enabled=false\n'; fi"
+    parser: parsers/nmap_scan.yaml
+    variables:
+      - name: enabled
+        required: false
+        default: "true"
+        description: 是否执行当前阶段。
+      - name: target
+        required: true
+        description: 目标地址、网段或主机清单。
+      - name: extra_args
+        required: false
+        default: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title"
+        description: 额外参数，按需覆盖。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe
+      source: external-tools
+
+  fscan_scan:
+    category: discovery
+    description: 从本地工具目录导入的 fscan 扫描模板，可配合 local 执行器进行 URL/主机扫描。
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe\" {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=fscan_scan enabled=false\n'; fi"
+    parser: parsers/fscan_scan.yaml
+    variables:
+      - name: enabled
+        required: false
+        default: "true"
+        description: 是否执行当前阶段。
+      - name: target
+        required: true
+        description: 目标地址或网段。
+      - name: extra_args
+        required: false
+        default: "-nobr"
+        description: 可选参数串。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe
+      source: external-tools
+
+  nuclei_scan:
+    category: vulnerability
+    description: 基于 nuclei 的模板执行节点；既可承载 Web 指纹/资产发现，也可承载 CVE 检测，适合作为统一发现引擎。
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe\" -u {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=nuclei_scan enabled=false\n'; fi"
+    parser: parsers/nuclei_scan.yaml
+    variables:
+      - name: enabled
+        required: false
+        default: "true"
+        description: 是否执行当前阶段。
+      - name: target
+        required: true
+        description: 目标 URL 或主机。
+      - name: extra_args
+        required: false
+        default: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1"
+        description: nuclei 参数串（不含 -u 与 -o），建议用模板目录表达发现逻辑。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe
+      source: external-tools
+
+  executor_placeholder:
+    category: action
+    description: 为后续自定义漏洞利用执行器预留接入点；当前只记录待执行动作，不执行利用。
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then printf 'PENDING_EXECUTION target={{ .inputs.target }} entry={{ .inputs.entry }} source={{ .inputs.source }} status=pending executor={{ .inputs.executor_name }} api={{ .inputs.executor_api_url }}\n'; else printf 'SKIPPED stage=executor_placeholder enabled=false\n'; fi"
+    parser: parsers/executor_placeholder.yaml
+    variables:
+      - name: enabled
+        required: false
+        default: "true"
+        description: 是否执行当前阶段。
+      - name: target
+        required: true
+        description: 当前目标。
+      - name: entry
+        required: true
+        description: 预留给执行器的入口 URL。
+      - name: source
+        required: false
+        default: nuclei
+        description: 触发该动作的发现来源。
+      - name: executor_name
+        required: false
+        default: custom-executor
+        description: 后续执行器名称占位。
+      - name: executor_api_url
+        required: false
+        default: http://127.0.0.1:8787/api/v1/execute
+        description: 后续执行器接口地址占位。
+
+  nuclei_path_scan:
+    category: discovery
+    description: 基于 nuclei 路径模板的路径发现扫描，发现 Web 应用的有效路径和 API 端点。
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe\" -u {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=nuclei_path_scan enabled=false\n'; fi"
+    parser: parsers/nuclei_path_scan.yaml
+    variables:
+      - name: enabled
+        required: false
+        default: "true"
+        description: 是否执行当前阶段。
+      - name: target
+        required: true
+        description: 目标 URL。
+      - name: extra_args
+        required: false
+        default: "-t \"cve/nuclei/paths\" -jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1"
+        description: nuclei 路径扫描参数。
+    metadata:
+      binary_path: /mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe
+      source: external-tools
+
+  exp_execute:
+    category: exploit
+    description: 调用 Python Exp 服务执行漏洞利用。
+    variables:
+      - name: target
+        required: true
+        description: 目标 URL。
+      - name: entry
+        required: false
+        description: 入口 URL。
+      - name: exploit_id
+        required: false
+        default: auto
+        description: 指定 exploit 模块 ID，auto 为自动选择。
+      - name: executor_name
+        required: false
+        default: auto
+        description: 执行器名称。
+      - name: finding
+        required: false
+        description: 关联的漏洞发现信息。
+      - name: command
+        required: false
+        description: 自定义执行命令。
+    metadata:
+      source: exp-service

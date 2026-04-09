@@ -20,6 +20,23 @@ tmp/
 # Local examples / playground data
 examples/
 
+# Local Python runtime artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local CVE exploit service runtime
+cve/exp/.venv/
+cve/exp/.venv-test/
+cve/exp/include/
+cve/exp/lib/
+cve/exp/bin/
+cve/exp/pyvenv.cfg
+
+# CVE content lives in its own repository
+cve/
+
 # Local agent metadata
 .codex
 

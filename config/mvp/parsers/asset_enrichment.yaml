@@ -1,0 +1,5 @@
+tool: asset_enrichment
+rules:
+  - name: capture_title
+    regex: "TITLE\\s+(?P<host>\\S+)\\s+(?P<title>.+)"
+    save_to: assets.http_metadata

@@ -1,0 +1,47 @@
+tool: curl_fetch
+rules:
+  - name: http_status
+    regex: "(?im)^HTTP/\\d(?:\\.\\d)?\\s+(?P<status_code>\\d{3})\\b.*$"
+    save_to: assets.web.http_statuses
+  - name: redirect_location
+    regex: "(?im)^location:\\s*(?P<location>\\S+)\\s*$"
+    save_to: assets.web.redirects
+  - name: html_title
+    regex: "(?is)<title>\\s*(?P<title>.*?)\\s*</title>"
+    save_to: assets.web.page_titles
+  - name: x_powered_by
+    regex: "(?im)^x-powered-by:\\s*(?P<value>.+)\\s*$"
+    save_to: assets.web.powered_by
+  - name: nextjs_fingerprint
+    regex: "(?im)^x-powered-by:\\s*(?P<framework>Next\\.js)\\s*$"
+    save_to: assets.web.fingerprints.frameworks
+  - name: react_rsc_flight_stream
+    regex: "(?i)(?P<feature>__next_f\\.push)"
+    save_to: assets.web.fingerprints.react_rsc
+  - name: dify_console_api_prefix
+    regex: "(?i)data-api-prefix=\"(?P<api_prefix>[^\"]+)\""
+    save_to: assets.web.fingerprints.dify_console_api
+  - name: dify_public_api_prefix
+    regex: "(?i)data-pub(?:l)?ic-api-prefix=\"(?P<api_prefix>[^\"]+)\""
+    save_to: assets.web.fingerprints.dify_public_api
+  - name: dify_public_edition
+    regex: "(?i)data-public-edition=\"(?P<edition>[^\"]+)\""
+    save_to: assets.web.fingerprints.dify_edition
+  - name: dify_marketplace_api_prefix
+    regex: "(?i)data-marketplace-api-prefix=\"(?P<api_prefix>[^\"]+)\""
+    save_to: assets.web.fingerprints.dify_marketplace_api
+  - name: dify_marketplace_url_prefix
+    regex: "(?i)data-marketplace-url-prefix=\"(?P<url_prefix>[^\"]+)\""
+    save_to: assets.web.fingerprints.dify_marketplace_url
+  - name: robots_noindex
+    regex: "(?i)<meta\\s+name=\"robots\"\\s+content=\"(?P<directive>[^\"]+)\""
+    save_to: assets.web.metadata.robots
+  - name: preload_logo
+    regex: "(?i)<link\\s+rel=\"preload\"\\s+as=\"image\"\\s+href=\"(?P<asset>[^\"]+/logo/[^\"]+)\""
+    save_to: assets.web.branding.preloaded_assets
+  - name: dify_product_name
+    regex: "(?i)<title>\\s*(?P<product>Dify)\\s*</title>"
+    save_to: assets.web.fingerprints.products
+  - name: next_static_asset
+    regex: "(?i)(?:href|src)=\"(?P<asset>/_next/static/[^\"]+)\""
+    save_to: assets.web.static_assets

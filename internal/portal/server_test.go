@@ -195,7 +195,7 @@ func TestReloadEndpointRefreshesWorkflowDefinition(t *testing.T) {
 	root := repoRoot(t)
 	tempDir := t.TempDir()
 	configRoot := filepath.Join(tempDir, "mvp")
-	copyDir(t, filepath.Join(root, "examples", "mvp"), configRoot)
+	copyDir(t, filepath.Join(root, "config", "mvp"), configRoot)
 
 	workflowPath := filepath.Join(configRoot, "workflow.yaml")
 	workflowData, err := os.ReadFile(workflowPath)
@@ -242,8 +242,8 @@ func TestToolFilesEndpointListsExternalFiles(t *testing.T) {
 	mustWriteFile(t, filepath.Join(externalRoot, "deep", "a", "b", "c", "skip.txt"), []byte("too deep"))
 
 	server, err := newServerWithExternalRoot(
-		filepath.Join(root, "examples", "mvp", "tools.yaml"),
-		filepath.Join(root, "examples", "mvp", "workflow.yaml"),
+		filepath.Join(root, "config", "mvp", "tools.yaml"),
+		filepath.Join(root, "config", "mvp", "workflow.yaml"),
 		externalRoot,
 		"",
 	)
@@ -303,7 +303,7 @@ func TestRunEndpointPersistsFailedRuns(t *testing.T) {
 	root := repoRoot(t)
 	tempDir := t.TempDir()
 	configRoot := filepath.Join(tempDir, "mvp")
-	copyDir(t, filepath.Join(root, "examples", "mvp"), configRoot)
+	copyDir(t, filepath.Join(root, "config", "mvp"), configRoot)
 
 	workflowPath := filepath.Join(configRoot, "workflow.yaml")
 	workflowData, err := os.ReadFile(workflowPath)
@@ -548,8 +548,8 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	root := repoRoot(t)
 	server, err := NewServer(
-		filepath.Join(root, "examples", "mvp", "tools.yaml"),
-		filepath.Join(root, "examples", "mvp", "workflow.yaml"),
+		filepath.Join(root, "config", "mvp", "tools.yaml"),
+		filepath.Join(root, "config", "mvp", "workflow.yaml"),
 	)
 	if err != nil {
 		t.Fatalf("NewServer returned error: %v", err)

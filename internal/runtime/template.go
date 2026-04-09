@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -55,7 +56,18 @@ func RenderValue(value any, ctx map[string]any) (any, error) {
 }
 
 func RenderString(raw string, ctx map[string]any) (string, error) {
-	tmpl, err := texttemplate.New("value").Option("missingkey=error").Parse(raw)
+	tmpl, err := texttemplate.New("value").
+		Funcs(texttemplate.FuncMap{
+			"json": func(value any) (string, error) {
+				encoded, err := json.Marshal(value)
+				if err != nil {
+					return "", fmt.Errorf("marshal json: %w", err)
+				}
+				return string(encoded), nil
+			},
+		}).
+		Option("missingkey=error").
+		Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", raw, err)
 	}

@@ -1,0 +1,5 @@
+tool: nuclei_path_scan
+rules:
+  - name: path_found
+    regex: "(?m)^.*\\[(?P<template>[^\\]]+)\\].*\\[(?P<severity>info|low|medium|high|critical)\\].*(?P<url>https?://\\S+)"
+    save_to: assets.paths.discovered

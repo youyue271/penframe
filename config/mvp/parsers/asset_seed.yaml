@@ -1,0 +1,11 @@
+tool: asset_seed
+rules:
+  - name: scope_target
+    regex: "(?m)^SCOPE\\s+target=(?P<target>\\S+)$"
+    save_to: assets.discovery.scope_targets
+  - name: seeded_host
+    regex: "(?m)^HOST\\s+host=(?P<host>\\S+)\\s+hostport=(?P<hostport>\\S+)\\s+origin=(?P<origin>\\S+)$"
+    save_to: assets.discovery.hosts
+  - name: seeded_entry
+    regex: "(?m)^ENTRY\\s+url=(?P<url>\\S+)\\s+kind=(?P<kind>\\S+)\\s+source=(?P<source>\\S+)$"
+    save_to: assets.discovery.entries

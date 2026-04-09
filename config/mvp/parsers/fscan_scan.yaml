@@ -1,0 +1,32 @@
+tool: fscan_scan
+rules:
+  - name: service_finding
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[(?P<level>SERVICE)\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:(?P<detail>.+)$"
+    save_to: assets.web.service_findings
+  - name: discovered_entry_inline
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[SERVICE\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:.*?\\btitle=(?P<title>[^,]+),\\s+url=(?P<url>\\S+),\\s+status_code=(?P<status_code>\\d+),\\s+length=(?P<length>\\d+).*$"
+    save_to: assets.discovery.entries
+  - name: web_title_inline
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[SERVICE\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:.*?\\btitle=(?P<title>[^,]+),\\s+url=(?P<url>\\S+),\\s+status_code=(?P<status_code>\\d+),\\s+length=(?P<length>\\d+).*$"
+    save_to: assets.web.pages
+  - name: discovered_entry_tail
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[SERVICE\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:.*?\\bstatus_code=(?P<status_code>\\d+),\\s+length=(?P<length>\\d+).*?\\btitle=(?P<title>[^,]+),\\s+url=(?P<url>\\S+).*$"
+    save_to: assets.discovery.entries
+  - name: web_title_tail
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[SERVICE\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:.*?\\bstatus_code=(?P<status_code>\\d+),\\s+length=(?P<length>\\d+).*?\\btitle=(?P<title>[^,]+),\\s+url=(?P<url>\\S+).*$"
+    save_to: assets.web.pages
+  - name: discovered_redirect
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[SERVICE\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:.*?location:(?P<location>\\S+)\\s+redirect_url:(?P<redirect_url>\\S+).*$"
+    save_to: assets.discovery.entries
+  - name: redirect_target
+    regex: "(?m)^\\[[^\\]]+\\]\\s+\\[SERVICE\\]\\s+目标:\\s*状态:(?P<status>\\S+)\\s+详情:.*?location:(?P<location>\\S+)\\s+redirect_url:(?P<redirect_url>\\S+).*$"
+    save_to: assets.web.redirects
+  - name: discovered_entry_title
+    regex: "(?m)^\\[[^\\]]+\\]\\s+网站标题\\s+(?P<url>\\S+)\\s+状态码:(?P<status_code>\\d+)\\s+长度:(?P<length>\\d+)\\s+标题:(?P<title>.+)$"
+    save_to: assets.discovery.entries
+  - name: web_title
+    regex: "(?m)^\\[[^\\]]+\\]\\s+网站标题\\s+(?P<url>\\S+)\\s+状态码:(?P<status_code>\\d+)\\s+长度:(?P<length>\\d+)\\s+标题:(?P<title>.+)$"
+    save_to: assets.web.pages
+  - name: vuln_finding
+    regex: "(?m)^\\[(?P<level>VULN)\\]\\s+目标:(?P<target>\\S+)\\s+状态:(?P<status>\\S+)\\s+详情:(?P<detail>.+)$"
+    save_to: assets.security.vulnerabilities

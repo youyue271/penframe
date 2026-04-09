@@ -1,0 +1,128 @@
+name: live-web-ctf-recon
+description: 面向授权 Web/CTF 靶场的 live workflow，按主机发现、入口发现、路径发现、漏洞发现、执行器占坑组织结果。
+global_vars:
+  target: https://eci-2zef2cvqyzex185pj2yt.cloudeci1.ichunqiu.com:3000
+  run_asset_seed: true
+  run_host_discovery: true
+  run_entry_discovery: true
+  run_path_discovery: true
+  run_nmap_quick: true
+  run_fscan_web: true
+  run_nuclei_path: true
+  run_nuclei_fingerprint: true
+  run_nuclei_cve: true
+  run_executor_placeholder: true
+  run_exp_execute: true
+  exp_command: "id"
+  exp_exploit_id: "auto"
+  nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title"
+  fscan_args: "-nobr -np -log INFO -m Web"
+  nuclei_path_templates: "cve/nuclei/paths"
+  nuclei_fingerprint_templates: "cve/nuclei/fingerprint"
+  nuclei_cve_templates: "cve/nuclei/cves"
+  nuclei_path_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1"
+  nuclei_fingerprint_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1"
+  nuclei_cve_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1"
+  executor_name: "custom-executor"
+  executor_api_url: "http://127.0.0.1:8787/api/v1/execute"
+nodes:
+  - id: start_chain
+    tool: chain_start
+    executor: local
+    inputs:
+      target: "{{ .vars.target_url }}"
+  - id: asset_seed
+    tool: asset_seed
+    executor: local
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_asset_seed }}"
+      target: "{{ .vars.target_url }}"
+      host: "{{ .vars.target_host }}"
+      hostport: "{{ .vars.target_hostport }}"
+      origin: "{{ .vars.target_origin }}"
+      entry: "{{ .vars.target_url }}"
+  - id: host_discovery
+    tool: nmap_scan
+    executor: local
+    timeout_seconds: 300
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_host_discovery }}"
+      target: "{{ .vars.target_host }}"
+      extra_args: "{{ .vars.nmap_quick_args }} -oN \"{{ .vars.output_dir_windows }}\\host-discovery.txt\""
+  - id: entry_discovery
+    tool: fscan_scan
+    executor: local
+    timeout_seconds: 300
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_entry_discovery }}"
+      target: "-u {{ .vars.target_url }}"
+      extra_args: "{{ .vars.fscan_args }} -o \"{{ .vars.output_dir_windows }}\\entry-discovery.txt\""
+  - id: nuclei_path
+    tool: nuclei_path_scan
+    executor: local
+    timeout_seconds: 600
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_nuclei_path }}"
+      target: "{{ .vars.target_url }}"
+      extra_args: "-t \"{{ .vars.nuclei_path_templates }}\" {{ .vars.nuclei_path_args }} -o \"{{ .vars.output_dir_windows }}\\nuclei-paths.jsonl\""
+  - id: nuclei_fingerprint
+    tool: nuclei_scan
+    executor: local
+    timeout_seconds: 900
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_nuclei_fingerprint }}"
+      target: "{{ .vars.target_url }}"
+      extra_args: "-t \"{{ .vars.nuclei_fingerprint_templates }}\" {{ .vars.nuclei_fingerprint_args }} -o \"{{ .vars.output_dir_windows }}\\nuclei-fingerprint.jsonl\""
+  - id: nuclei_cve
+    tool: nuclei_scan
+    executor: local
+    timeout_seconds: 900
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_nuclei_cve }}"
+      target: "{{ .vars.target_url }}"
+      extra_args: "-t \"{{ .vars.nuclei_cve_templates }}\" {{ .vars.nuclei_cve_args }} -o \"{{ .vars.output_dir_windows }}\\nuclei-cve.jsonl\""
+  - id: executor_placeholder
+    tool: executor_placeholder
+    executor: local
+    continue_on_error: true
+    inputs:
+      enabled: "{{ .vars.run_executor_placeholder }}"
+      target: "{{ .vars.target_url }}"
+      entry: "{{ .vars.target_url }}"
+      source: "nuclei"
+      executor_name: "{{ .vars.executor_name }}"
+      executor_api_url: "{{ .vars.executor_api_url }}"
+  - id: exp_execute
+    tool: exp_execute
+    executor: exp
+    continue_on_error: true
+    inputs:
+      target: "{{ .vars.target_url }}"
+      entry: "{{ .vars.target_url }}"
+      exploit_id: "{{ .vars.exp_exploit_id }}"
+      command: "{{ .vars.exp_command }}"
+      finding: '{{ json .assets.security.cve_findings }}'
+edges:
+  - from: start_chain
+    to: asset_seed
+  - from: asset_seed
+    to: host_discovery
+  - from: host_discovery
+    to: entry_discovery
+  - from: entry_discovery
+    to: nuclei_path
+  - from: nuclei_path
+    to: nuclei_fingerprint
+  - from: nuclei_fingerprint
+    to: nuclei_cve
+  - from: nuclei_cve
+    to: executor_placeholder
+  - from: nuclei_cve
+    to: exp_execute
+    condition: "vars.run_exp_execute == true && exists(assets.security.cve_findings) && len(assets.security.cve_findings) > 0"

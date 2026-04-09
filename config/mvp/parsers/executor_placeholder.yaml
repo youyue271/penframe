@@ -1,0 +1,5 @@
+tool: executor_placeholder
+rules:
+  - name: pending_execution
+    regex: "(?m)^PENDING_EXECUTION\\s+target=(?P<target>\\S+)\\s+entry=(?P<entry>\\S+)\\s+source=(?P<source>\\S+)\\s+status=(?P<status>\\S+)\\s+executor=(?P<executor>\\S+)\\s+api=(?P<api>\\S+)$"
+    save_to: assets.actions.pending_exploitation

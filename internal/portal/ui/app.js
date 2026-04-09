@@ -20,8 +20,8 @@ const state = {
     run_executor_placeholder: true,
     nmap_quick_args: "",
     fscan_args: "",
-    nuclei_fingerprint_templates: "examples/nuclei/fingerprint",
-    nuclei_cve_templates: "examples/nuclei/cves",
+    nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
+    nuclei_cve_templates: "cve/nuclei/cves",
     nuclei_fingerprint_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     nuclei_cve_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     executor_name: "custom-executor",
@@ -66,8 +66,8 @@ const CHAIN_PRESETS = {
     run_executor_placeholder: true,
     nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title",
     fscan_args: "-nobr -np -log INFO -m Web",
-    nuclei_fingerprint_templates: "examples/nuclei/fingerprint",
-    nuclei_cve_templates: "examples/nuclei/cves",
+    nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
+    nuclei_cve_templates: "cve/nuclei/cves",
     nuclei_fingerprint_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     nuclei_cve_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     executor_name: "custom-executor",
@@ -83,8 +83,8 @@ const CHAIN_PRESETS = {
     run_executor_placeholder: false,
     nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title",
     fscan_args: "-nobr -np -log INFO -m Web",
-    nuclei_fingerprint_templates: "examples/nuclei/fingerprint",
-    nuclei_cve_templates: "examples/nuclei/cves",
+    nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
+    nuclei_cve_templates: "cve/nuclei/cves",
     nuclei_fingerprint_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     nuclei_cve_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     executor_name: "custom-executor",
@@ -100,8 +100,8 @@ const CHAIN_PRESETS = {
     run_executor_placeholder: true,
     nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title",
     fscan_args: "-nobr -np -log INFO -m Web",
-    nuclei_fingerprint_templates: "examples/nuclei/fingerprint",
-    nuclei_cve_templates: "examples/nuclei/cves",
+    nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
+    nuclei_cve_templates: "cve/nuclei/cves",
     nuclei_fingerprint_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     nuclei_cve_args: "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1",
     executor_name: "custom-executor",
@@ -131,8 +131,8 @@ function hydrateChainDefaults() {
   state.chain.run_executor_placeholder = toBool(vars.run_executor_placeholder, true);
   state.chain.nmap_quick_args = String(vars.nmap_quick_args || "");
   state.chain.fscan_args = String(vars.fscan_args || "");
-  state.chain.nuclei_fingerprint_templates = String(vars.nuclei_fingerprint_templates || "examples/nuclei/fingerprint");
-  state.chain.nuclei_cve_templates = String(vars.nuclei_cve_templates || "examples/nuclei/cves");
+  state.chain.nuclei_fingerprint_templates = String(vars.nuclei_fingerprint_templates || "cve/nuclei/fingerprint");
+  state.chain.nuclei_cve_templates = String(vars.nuclei_cve_templates || "cve/nuclei/cves");
   state.chain.nuclei_fingerprint_args = String(vars.nuclei_fingerprint_args || "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1");
   state.chain.nuclei_cve_args = String(vars.nuclei_cve_args || "-jsonl -duc -ni -nc -rl 80 -timeout 10 -retries 1");
   state.chain.executor_name = String(vars.executor_name || "custom-executor");

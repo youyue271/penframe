@@ -17,8 +17,8 @@ cd "$ROOT"
 
 # ---------- 参数解析 ----------
 TARGET=""
-WORKFLOW="examples/live/workflow.yaml"
-TOOLS="examples/mvp/tools.yaml"
+WORKFLOW="config/live/workflow.yaml"
+TOOLS="config/mvp/tools.yaml"
 API_PORT=8080
 EXP_PORT=8787
 WEB_PORT=5173
@@ -38,8 +38,8 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "Usage: $0 [options]"
       echo "  --target URL       Default scan target"
-      echo "  --workflow PATH    Workflow YAML (default: examples/live/workflow.yaml)"
-      echo "  --tools PATH       Tools YAML (default: examples/mvp/tools.yaml)"
+      echo "  --workflow PATH    Workflow YAML (default: config/live/workflow.yaml)"
+      echo "  --tools PATH       Tools YAML (default: config/mvp/tools.yaml)"
       echo "  --api-port PORT    Go API port (default: 8080)"
       echo "  --exp-port PORT    Python Exp port (default: 8787)"
       echo "  --web-port PORT    Vue dev port (default: 5173)"
@@ -145,7 +145,7 @@ fi
 ok "Go binary: $PORTAL_BIN"
 
 # ---------- Python 依赖 ----------
-EXP_VENV_DEFAULT="$ROOT/examples/exp/.venv"
+EXP_VENV_DEFAULT="$ROOT/cve/exp/.venv"
 EXP_VENV_FALLBACK="/tmp/penframe-exp/.venv"
 EXP_VENV="${PENFRAME_EXP_VENV:-$EXP_VENV_DEFAULT}"
 if [[ "$SKIP_EXP" != "true" ]]; then
@@ -178,7 +178,7 @@ if [[ "$SKIP_EXP" != "true" ]]; then
   info "Checking Python dependencies..."
   if ! "$EXP_VENV/bin/python" -c "import fastapi, uvicorn, httpx, pydantic" 2>/dev/null; then
     info "Installing Python dependencies into venv..."
-    "$EXP_VENV/bin/pip" install -q -r examples/exp/requirements.txt 2>&1 || fail "pip install failed"
+    "$EXP_VENV/bin/pip" install -q -r cve/exp/requirements.txt 2>&1 || fail "pip install failed"
   fi
   ok "Python dependencies ready"
 fi
@@ -213,7 +213,7 @@ trap cleanup EXIT INT TERM
 if [[ "$SKIP_EXP" != "true" ]]; then
   info "Starting Python Exp service on port ${EXP_PORT}..."
   (
-    cd examples/exp || exit 1
+    cd cve/exp || exit 1
     exec "$EXP_VENV/bin/uvicorn" server:app \
       --host 0.0.0.0 --port "$EXP_PORT" \
       --log-level info \

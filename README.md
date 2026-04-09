@@ -21,7 +21,9 @@
 - `internal/workflow`: 工作流执行与条件求值
 - `internal/portal`: 嵌入式 Web UI 与 API
 - `internal/storage`: 内存存储占位
-- `examples/`: 本地样例工具、流程、解析规则与输出目录（已加入 `.gitignore`，默认不提交）
+- `config/`: 默认工作流、工具目录、parser 与 fixture 配置
+- `cve/`: Nuclei 模板与 Exp 服务模块
+- `examples/`: 本地临时样例 / 私有试验目录（已加入 `.gitignore`）
 
 ## 当前工作流
 
@@ -35,7 +37,7 @@
 
 ## 运行方式
 
-仓库默认不再跟踪 `examples/`。如果你本地需要保留私有 workflow、靶机配置、模板目录或样例输出，可以继续放在 `examples/` 下，但这些内容不会被提交到 GitHub。
+仓库默认跟踪 `config/` 与 `cve/` 下的正式配置和漏洞资产；`examples/` 保留为本地私有试验目录，不会提交到 GitHub。
 
 启动 CLI / Portal 时需要显式传入工具目录与 workflow 路径，例如：
 
@@ -47,7 +49,14 @@ go run ./cmd/opo -tools /path/to/tools.yaml -workflow /path/to/workflow.yaml -ta
 go run ./cmd/portal -tools /path/to/tools.yaml -workflow /path/to/workflow.yaml
 ```
 
-如果你本地仍然维护了 `examples/`，也可以直接传入类似 `examples/mvp/tools.yaml`、`examples/live/workflow.yaml` 这样的路径。
+仓库默认目录改为：
+
+- `config/mvp/tools.yaml`
+- `config/live/workflow.yaml`
+- `cve/nuclei/...`
+- `cve/exp/...`
+
+如果你本地还维护了私有样例，也可以继续通过命令行显式传入其他路径。
 
 CLI 预期输出是一个 JSON 运行摘要，包含：
 

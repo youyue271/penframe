@@ -1,0 +1,14 @@
+tool: nuclei_scan
+rules:
+  - name: nuclei_finding_jsonl
+    regex: '(?m)^\{[^\n]*"template-id":"(?P<template_id>[^"]+)"[^\n]*"name":"(?P<name>[^"]+)"[^\n]*"severity":"(?P<severity>info|low|medium|high|critical|unknown)"[^\n]*"matched-at":"(?P<target>[^"]+)"[^\n]*\}$'
+    save_to: assets.discovery.nuclei_findings
+  - name: nuclei_cve_jsonl
+    regex: '(?mi)^\{[^\n]*"template-id":"(?P<template_id>cve-[^"]+)"[^\n]*"name":"(?P<name>[^"]+)"[^\n]*"severity":"(?P<severity>info|low|medium|high|critical|unknown)"[^\n]*"matched-at":"(?P<target>[^"]+)"[^\n]*\}$'
+    save_to: assets.security.cve_findings
+  - name: nuclei_react2shell_behavior
+    regex: '(?mi)^\{[^\n]*"template-id":"(?P<template_id>cve-2025-55182-behavior-check)"[^\n]*"name":"(?P<name>[^"]+)"[^\n]*"severity":"(?P<severity>info|low|medium|high|critical|unknown)"[^\n]*"matched-at":"(?P<target>[^"]+)"[^\n]*\}$'
+    save_to: assets.security.cve_findings
+  - name: nuclei_cve_finding
+    regex: "(?m)^\\[(?P<template_id>[A-Za-z0-9._:-]+)\\]\\s+\\[(?P<protocol>[A-Za-z0-9_-]+)\\]\\s+\\[(?P<severity>info|low|medium|high|critical|unknown)\\]\\s+(?P<target>\\S+).*$"
+    save_to: assets.security.cve_findings
