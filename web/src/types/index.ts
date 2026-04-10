@@ -142,9 +142,23 @@ export interface ExploitInfo {
   severity: string
   targets: string[]
   supports_check?: boolean
+  supports_exploit?: boolean
   supports_execute?: boolean
   supports_command?: boolean
+  exploit_kind?: string
+  tags?: string[]
+  options?: ExploitOption[]
   default_command?: string
+}
+
+export interface ExploitOption {
+  key: string
+  label: string
+  type?: string
+  placeholder?: string
+  description?: string
+  required?: boolean
+  modes?: string[]
 }
 
 export interface ExploitRequest {
@@ -152,6 +166,8 @@ export interface ExploitRequest {
   exploit_id?: string
   mode?: 'check' | 'execute'
   command?: string
+  leak_path?: string
+  options?: Record<string, string>
 }
 
 export interface Target {

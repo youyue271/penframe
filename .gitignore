@@ -39,6 +39,7 @@ cve/
 
 # Local agent metadata
 .codex
+.claude/
 
 # Frontend dependencies
 node_modules/

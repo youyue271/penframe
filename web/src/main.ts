@@ -11,6 +11,7 @@ import TargetWorkspace from './views/TargetWorkspace.vue'
 import AssetGraph from './views/AssetGraph.vue'
 import ExploitPanel from './views/ExploitPanel.vue'
 import ProjectView from './views/ProjectView.vue'
+import ConfigView from './views/ConfigView.vue'
 
 console.log('[Penframe] Starting application...')
 
@@ -24,6 +25,7 @@ const router = createRouter({
     { path: '/projects/:id/targets/:tid/exploit', name: 'target-exploit', component: ExploitPanel },
     { path: '/assets', name: 'assets', component: AssetGraph },
     { path: '/exploit', name: 'exploit', component: ExploitPanel },
+    { path: '/config', name: 'config', component: ConfigView },
   ],
 })
 

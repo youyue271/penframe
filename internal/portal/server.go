@@ -168,6 +168,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("/api/reload", s.handleReload)
 	s.mux.HandleFunc("/api/runs", s.handleRuns)
 	s.mux.HandleFunc("/api/runs/", s.handleRunByID)
+	s.mux.HandleFunc("/api/config/tool-paths", s.handleToolPathConfig)
 	s.mux.HandleFunc("/api/tool-files", s.handleToolFiles)
 
 	// New API routes for asset graph, scan control, and exploit.
@@ -438,17 +439,10 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	toolsPath, workflowPath, _, _, _ := s.snapshotRuntime()
-	tools, wf, runner, err := loadRuntime(toolsPath, workflowPath)
-	if err != nil {
+	if err := s.reloadRuntimeFromDisk(toolsPath, workflowPath); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-
-	s.mu.Lock()
-	s.tools = tools
-	s.workflow = wf
-	s.runner = runner
-	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, s.currentStateResponse())
 }
@@ -524,6 +518,19 @@ func (s *Server) externalToolsRoot() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.externalRoot
+}
+
+func (s *Server) reloadRuntimeFromDisk(toolsPath, workflowPath string) error {
+	tools, wf, runner, err := loadRuntime(toolsPath, workflowPath)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.tools = tools
+	s.workflow = wf
+	s.runner = runner
+	s.mu.Unlock()
+	return nil
 }
 
 func loadRuntime(toolsPath, workflowPath string) (map[string]domain.ToolDefinition, domain.Workflow, *workflow.Runner, error) {

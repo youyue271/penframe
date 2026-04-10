@@ -36,13 +36,13 @@ func NewExpExecutor(baseURL string) ExpExecutor {
 func (ExpExecutor) Name() string { return "exp" }
 
 type expRequest struct {
-	Executor string            `json:"executor"`
-	Target   string            `json:"target"`
-	Entry    string            `json:"entry"`
-	Finding  string            `json:"finding,omitempty"`
-	Command  string            `json:"command,omitempty"`
-	Options  map[string]string `json:"options,omitempty"`
-	Metadata map[string]any    `json:"metadata,omitempty"`
+	Executor string         `json:"executor"`
+	Target   string         `json:"target"`
+	Entry    string         `json:"entry"`
+	Finding  string         `json:"finding,omitempty"`
+	Command  string         `json:"command,omitempty"`
+	Options  map[string]any `json:"options,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type expResponse struct {
@@ -76,6 +76,7 @@ func (e ExpExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ do
 	if payload.Executor == "" {
 		payload.Executor = "auto"
 	}
+	payload.Metadata = collectProxyMetadata(renderedInputs)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -161,9 +162,14 @@ func (e ExpExecutor) ListExploits(ctx context.Context) ([]byte, error) {
 
 // CheckExploit calls the Python service's check endpoint.
 func (e ExpExecutor) CheckExploit(ctx context.Context, target, exploitID string) ([]byte, error) {
-	payload := map[string]string{
+	return e.CheckExploitWithOptions(ctx, target, exploitID, nil)
+}
+
+func (e ExpExecutor) CheckExploitWithOptions(ctx context.Context, target, exploitID string, options map[string]any) ([]byte, error) {
+	payload := map[string]any{
 		"target":     target,
 		"exploit_id": exploitID,
+		"options":    options,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -184,11 +190,16 @@ func (e ExpExecutor) CheckExploit(ctx context.Context, target, exploitID string)
 
 // RunExploit calls the Python service's execute endpoint for manual portal use.
 func (e ExpExecutor) RunExploit(ctx context.Context, target, exploitID, command string) ([]byte, error) {
+	return e.RunExploitWithOptions(ctx, target, exploitID, command, nil)
+}
+
+func (e ExpExecutor) RunExploitWithOptions(ctx context.Context, target, exploitID, command string, options map[string]any) ([]byte, error) {
 	payload := expRequest{
 		Executor: exploitID,
 		Target:   target,
 		Entry:    target,
 		Command:  command,
+		Options:  options,
 	}
 	if payload.Executor == "" {
 		payload.Executor = "auto"
@@ -219,4 +230,20 @@ func inputStr(inputs map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func collectProxyMetadata(inputs map[string]any) map[string]any {
+	httpProxy := inputStr(inputs, "http_proxy")
+	socks5Proxy := inputStr(inputs, "socks5_proxy")
+	if httpProxy == "" && socks5Proxy == "" {
+		return nil
+	}
+	metadata := map[string]any{}
+	if httpProxy != "" {
+		metadata["http_proxy"] = httpProxy
+	}
+	if socks5Proxy != "" {
+		metadata["socks5_proxy"] = socks5Proxy
+	}
+	return metadata
 }

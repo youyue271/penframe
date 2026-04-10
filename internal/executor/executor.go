@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,10 +141,11 @@ func (e HTTPExecutor) Execute(ctx context.Context, node domain.WorkflowNode, _ d
 	if err != nil {
 		return domain.ExecutionResult{}, fmt.Errorf("build http request: %w", err)
 	}
+	mergedProxyEnv := mergeEnvMap(os.Environ(), node.Env)
 	client := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			Proxy:           http.ProxyFromEnvironment,
+			Proxy:           proxyFuncFromEnvMap(mergedProxyEnv),
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -308,17 +310,7 @@ func mergeCommandEnv(base []string, overrides map[string]any) []string {
 		return append([]string(nil), base...)
 	}
 
-	merged := make(map[string]string, len(base)+len(overrides))
-	for _, entry := range base {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
-		merged[key] = value
-	}
-	for key, value := range overrides {
-		merged[key] = envValueString(value)
-	}
+	merged := mergeEnvMap(base, overrides)
 
 	keys := make([]string, 0, len(merged))
 	for key := range merged {
@@ -331,6 +323,63 @@ func mergeCommandEnv(base []string, overrides map[string]any) []string {
 		result = append(result, key+"="+merged[key])
 	}
 	return result
+}
+
+func mergeEnvMap(base []string, overrides map[string]any) map[string]string {
+	merged := make(map[string]string, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		merged[key] = value
+	}
+	for key, value := range overrides {
+		merged[key] = envValueString(value)
+	}
+	return merged
+}
+
+func proxyFuncFromEnvMap(env map[string]string) func(*http.Request) (*url.URL, error) {
+	return func(req *http.Request) (*url.URL, error) {
+		if req == nil || req.URL == nil {
+			return nil, nil
+		}
+		return proxyURLFromEnv(req.URL, env)
+	}
+}
+
+func proxyURLFromEnv(target *url.URL, env map[string]string) (*url.URL, error) {
+	if target == nil {
+		return nil, nil
+	}
+
+	lookup := func(keys ...string) string {
+		for _, key := range keys {
+			if value := strings.TrimSpace(env[key]); value != "" {
+				return value
+			}
+		}
+		return ""
+	}
+
+	var raw string
+	switch strings.ToLower(target.Scheme) {
+	case "https":
+		raw = lookup("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
+	case "http":
+		raw = lookup("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
+	default:
+		raw = lookup("ALL_PROXY", "all_proxy")
+	}
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	return parsed, nil
 }
 
 func envKeys(values map[string]any) []string {

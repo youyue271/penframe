@@ -18,6 +18,8 @@ const state = {
     run_nuclei_fingerprint: true,
     run_nuclei_cve: true,
     run_executor_placeholder: true,
+    fscan_binary_path: "",
+    nuclei_binary_path: "",
     nmap_quick_args: "",
     fscan_args: "",
     nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
@@ -64,6 +66,8 @@ const CHAIN_PRESETS = {
     run_nuclei_fingerprint: true,
     run_nuclei_cve: true,
     run_executor_placeholder: true,
+    fscan_binary_path: "/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe",
+    nuclei_binary_path: "/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe",
     nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title",
     fscan_args: "-nobr -np -log INFO -m Web",
     nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
@@ -81,6 +85,8 @@ const CHAIN_PRESETS = {
     run_nuclei_fingerprint: true,
     run_nuclei_cve: false,
     run_executor_placeholder: false,
+    fscan_binary_path: "/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe",
+    nuclei_binary_path: "/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe",
     nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title",
     fscan_args: "-nobr -np -log INFO -m Web",
     nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
@@ -98,6 +104,8 @@ const CHAIN_PRESETS = {
     run_nuclei_fingerprint: true,
     run_nuclei_cve: true,
     run_executor_placeholder: true,
+    fscan_binary_path: "/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe",
+    nuclei_binary_path: "/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe",
     nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title",
     fscan_args: "-nobr -np -log INFO -m Web",
     nuclei_fingerprint_templates: "cve/nuclei/fingerprint",
@@ -129,6 +137,8 @@ function hydrateChainDefaults() {
   state.chain.run_nuclei_fingerprint = toBool(vars.run_nuclei_fingerprint, true);
   state.chain.run_nuclei_cve = toBool(vars.run_nuclei_cve, true);
   state.chain.run_executor_placeholder = toBool(vars.run_executor_placeholder, true);
+  state.chain.fscan_binary_path = String(vars.fscan_binary_path || toolBinaryPath("fscan_scan", vars));
+  state.chain.nuclei_binary_path = String(vars.nuclei_binary_path || toolBinaryPath("nuclei_scan", vars));
   state.chain.nmap_quick_args = String(vars.nmap_quick_args || "");
   state.chain.fscan_args = String(vars.fscan_args || "");
   state.chain.nuclei_fingerprint_templates = String(vars.nuclei_fingerprint_templates || "cve/nuclei/fingerprint");
@@ -452,6 +462,10 @@ function renderChainEditor() {
       <input class="chain-args" type="text" data-chain-field="fscan_args" value="${escapeHTML(state.chain.fscan_args)}">
     </article>
     <article class="item chain-row">
+      <label class="chain-toggle">fscan 路径</label>
+      <input class="chain-args" type="text" data-chain-field="fscan_binary_path" value="${escapeHTML(state.chain.fscan_binary_path)}">
+    </article>
+    <article class="item chain-row">
       <label class="chain-toggle">
         <input type="checkbox" data-chain-field="run_nuclei_fingerprint" ${state.chain.run_nuclei_fingerprint ? "checked" : ""}>
         nuclei 指纹发现
@@ -461,6 +475,10 @@ function renderChainEditor() {
     <article class="item chain-row">
       <label class="chain-toggle">nuclei 指纹参数</label>
       <input class="chain-args" type="text" data-chain-field="nuclei_fingerprint_args" value="${escapeHTML(state.chain.nuclei_fingerprint_args)}">
+    </article>
+    <article class="item chain-row">
+      <label class="chain-toggle">nuclei 路径</label>
+      <input class="chain-args" type="text" data-chain-field="nuclei_binary_path" value="${escapeHTML(state.chain.nuclei_binary_path)}">
     </article>
     <article class="item chain-row">
       <label class="chain-toggle">
@@ -491,8 +509,8 @@ function renderChainPreview(run) {
   const hostport = targetDetails.hostport || host || url;
   const origin = targetDetails.origin || url;
   const nmapPath = toolBinaryPath("nmap_scan");
-  const fscanPath = toolBinaryPath("fscan_scan");
-  const nucleiPath = toolBinaryPath("nuclei_scan");
+  const fscanPath = resolveChainBinaryPath("fscan_binary_path", "fscan_scan");
+  const nucleiPath = resolveChainBinaryPath("nuclei_binary_path", "nuclei_scan");
   const outputSlug = sanitizeTarget(hostport);
   const outputUnix = `<运行时自动生成>/output/${outputSlug}`;
   const outputWindows = `<运行时自动生成>\\output\\${outputSlug}`;
@@ -629,9 +647,16 @@ function chainNodeStage(nodeID, run, runInProgress, unresolvedIndex, currentInde
   return { className: "", label: "待执行", hint: "尚未开始本次任务。" };
 }
 
-function toolBinaryPath(toolName) {
+function toolBinaryPath(toolName, vars = state.portal?.workflow?.global_vars || {}) {
   const tool = (state.portal?.tools || []).find((item) => item.name === toolName);
-  return String(tool?.metadata?.binary_path || tool?.name || toolName);
+  const binaryVar = String(tool?.metadata?.binary_var || "");
+  const varsValue = binaryVar ? String(vars?.[binaryVar] || "").trim() : "";
+  return varsValue || String(tool?.metadata?.binary_path || tool?.name || toolName);
+}
+
+function resolveChainBinaryPath(field, toolName) {
+  const override = String(state.chain?.[field] || "").trim();
+  return override || toolBinaryPath(toolName);
 }
 
 function orderedNodeIds(run) {
@@ -1584,6 +1609,8 @@ async function runTask() {
           run_nuclei_fingerprint: state.chain.run_nuclei_fingerprint,
           run_nuclei_cve: state.chain.run_nuclei_cve,
           run_executor_placeholder: state.chain.run_executor_placeholder,
+          fscan_binary_path: resolveChainBinaryPath("fscan_binary_path", "fscan_scan"),
+          nuclei_binary_path: resolveChainBinaryPath("nuclei_binary_path", "nuclei_scan"),
           nmap_quick_args: state.chain.nmap_quick_args,
           fscan_args: state.chain.fscan_args,
           nuclei_fingerprint_templates: state.chain.nuclei_fingerprint_templates,

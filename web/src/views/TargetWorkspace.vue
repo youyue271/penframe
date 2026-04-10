@@ -227,11 +227,12 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getProjectTargets, type Target } from '@/api/target'
 import { fetchLatestTargetRun, startScan as startScanAPI } from '@/api/scan'
 import { listExploits, triggerExploit, type ExploitInfo } from '@/api/exploit'
 import { useAssetStore } from '@/stores/asset'
+import type { ExploitOption } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -546,7 +547,7 @@ async function startScan() {
     const result = await startScanAPI({
       target: currentTarget.value.url,
       project_id: projectId.value,
-      target_id: targetId.value
+      target_id: targetId.value,
     })
     scanResult.value = result
     await assetStore.load(result.run_id)
@@ -620,11 +621,17 @@ async function runExploit(exploit: ExploitInfo) {
   }
 
   try {
+    const options = await collectExploitOptions(exploit, 'execute')
+    if (options === null) {
+      return
+    }
     const result = await triggerExploit({
       target: currentTarget.value.url,
       exploit_id: exploit.id,
       mode: 'execute',
-      command: 'id',
+      command: exploit.supports_command ? (exploit.default_command || 'id') : '',
+      options,
+      leak_path: options.leak_path || '',
       project_id: projectId.value,
       target_id: targetId.value
     })
@@ -637,6 +644,38 @@ async function runExploit(exploit: ExploitInfo) {
   } catch (e: any) {
     ElMessage.error(`Exploit failed: ${e.message}`)
   }
+}
+
+function filterExploitOptions(exploit: ExploitInfo, mode: 'check' | 'execute'): ExploitOption[] {
+  return (exploit.options || []).filter(option => {
+    const modes = option.modes?.length ? option.modes : ['execute']
+    return modes.includes(mode)
+  })
+}
+
+async function collectExploitOptions(exploit: ExploitInfo, mode: 'check' | 'execute'): Promise<Record<string, string> | null> {
+  const options = filterExploitOptions(exploit, mode)
+  const result: Record<string, string> = {}
+  for (const option of options) {
+    try {
+      const response = await ElMessageBox.prompt(option.description || `Enter ${option.label}`, option.label, {
+        confirmButtonText: 'OK',
+        cancelButtonText: 'Cancel',
+        inputPlaceholder: option.placeholder || '',
+        inputValue: '',
+      })
+      const value = response.value.trim()
+      if (value) {
+        result[option.key] = value
+      } else if (option.required) {
+        ElMessage.warning(`${option.label} is required`)
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
+  return result
 }
 
 onMounted(async () => {

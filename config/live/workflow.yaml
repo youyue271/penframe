@@ -15,6 +15,11 @@ global_vars:
   run_exp_execute: true
   exp_command: "id"
   exp_exploit_id: "auto"
+  http_proxy: ""
+  socks5_proxy: ""
+  nmap_binary_path: "/mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe"
+  fscan_binary_path: "/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe"
+  nuclei_binary_path: "/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe"
   nmap_quick_args: "-Pn -n -p 80,443,3000 -sV --script http-methods,http-security-headers,ssl-enum-ciphers,http-title"
   fscan_args: "-nobr -np -log INFO -m Web"
   nuclei_path_templates: "cve/nuclei/paths"
@@ -107,6 +112,8 @@ nodes:
       entry: "{{ .vars.target_url }}"
       exploit_id: "{{ .vars.exp_exploit_id }}"
       command: "{{ .vars.exp_command }}"
+      http_proxy: "{{ .vars.http_proxy }}"
+      socks5_proxy: "{{ .vars.socks5_proxy }}"
       finding: '{{ json .assets.security.cve_findings }}'
 edges:
   - from: start_chain

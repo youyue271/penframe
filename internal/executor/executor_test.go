@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -271,6 +272,41 @@ func TestHTTPExecutorWritesHeadersAndBody(t *testing.T) {
 	}
 	if string(bodyData) != "<title>Dify</title>" {
 		t.Fatalf("unexpected body content %q", string(bodyData))
+	}
+}
+
+func TestProxyURLFromEnvPrefersHTTPThenAllProxy(t *testing.T) {
+	target, err := url.Parse("https://demo.example")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+
+	proxyURL, err := proxyURLFromEnv(target, map[string]string{
+		"HTTP_PROXY": "http://127.0.0.1:8080",
+		"ALL_PROXY":  "socks5://127.0.0.1:1080",
+	})
+	if err != nil {
+		t.Fatalf("proxyURLFromEnv returned error: %v", err)
+	}
+	if proxyURL == nil || proxyURL.String() != "http://127.0.0.1:8080" {
+		t.Fatalf("expected HTTP proxy to win, got %#v", proxyURL)
+	}
+}
+
+func TestProxyURLFromEnvFallsBackToAllProxy(t *testing.T) {
+	target, err := url.Parse("http://demo.example")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+
+	proxyURL, err := proxyURLFromEnv(target, map[string]string{
+		"ALL_PROXY": "socks5://127.0.0.1:1080",
+	})
+	if err != nil {
+		t.Fatalf("proxyURLFromEnv returned error: %v", err)
+	}
+	if proxyURL == nil || proxyURL.String() != "socks5://127.0.0.1:1080" {
+		t.Fatalf("expected ALL_PROXY fallback, got %#v", proxyURL)
 	}
 }
 

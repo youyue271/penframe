@@ -327,6 +327,7 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 				continue
 			}
 		}
+		renderedEnv = applyGlobalProxyEnv(renderedEnv, summary.Vars)
 		node.Env = renderedEnv
 
 		var renderedCommand string
@@ -451,6 +452,38 @@ func (r *Runner) Run(ctx context.Context, wf domain.Workflow) (domain.RunSummary
 	}
 
 	return returnWithSuccess(summary)
+}
+
+func applyGlobalProxyEnv(renderedEnv map[string]any, vars map[string]any) map[string]any {
+	if renderedEnv == nil {
+		renderedEnv = map[string]any{}
+	}
+
+	httpProxy := mapValueString(vars, "http_proxy")
+	socks5Proxy := mapValueString(vars, "socks5_proxy")
+
+	if httpProxy != "" {
+		renderedEnv["HTTP_PROXY"] = httpProxy
+		renderedEnv["HTTPS_PROXY"] = httpProxy
+		renderedEnv["http_proxy"] = httpProxy
+		renderedEnv["https_proxy"] = httpProxy
+	}
+	if socks5Proxy != "" {
+		renderedEnv["ALL_PROXY"] = socks5Proxy
+		renderedEnv["all_proxy"] = socks5Proxy
+	}
+	return renderedEnv
+}
+
+func mapValueString(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, ok := values[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 func renderDynamicMap(values map[string]any, label string, ctx map[string]any) (map[string]any, error) {

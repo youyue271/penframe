@@ -71,7 +71,7 @@ tools:
   nmap_scan:
     category: discovery
     description: 从本地工具目录导入的 nmap 扫描模板，可配合 local 执行器在 WSL 中通过 powershell.exe 执行。
-    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe\" {{ .inputs.extra_args }} {{ .inputs.target }}; else printf 'SKIPPED stage=nmap_scan enabled=false\n'; fi"
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"{{ .vars.nmap_binary_path }}\" {{ .inputs.extra_args }} {{ .inputs.target }}; else printf 'SKIPPED stage=nmap_scan enabled=false\n'; fi"
     parser: parsers/nmap_scan.yaml
     variables:
       - name: enabled
@@ -87,12 +87,14 @@ tools:
         description: 额外参数，按需覆盖。
     metadata:
       binary_path: /mnt/h/tools/Penetration/tools/01 scan/Nmap/nmap.exe
+      binary_var: nmap_binary_path
+      binary_label: Nmap
       source: external-tools
 
   fscan_scan:
     category: discovery
     description: 从本地工具目录导入的 fscan 扫描模板，可配合 local 执行器进行 URL/主机扫描。
-    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe\" {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=fscan_scan enabled=false\n'; fi"
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"{{ .vars.fscan_binary_path }}\" {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=fscan_scan enabled=false\n'; fi"
     parser: parsers/fscan_scan.yaml
     variables:
       - name: enabled
@@ -108,12 +110,14 @@ tools:
         description: 可选参数串。
     metadata:
       binary_path: /mnt/h/tools/Penetration/tools/01 scan/fscan/fscan.exe
+      binary_var: fscan_binary_path
+      binary_label: fscan
       source: external-tools
 
   nuclei_scan:
     category: vulnerability
     description: 基于 nuclei 的模板执行节点；既可承载 Web 指纹/资产发现，也可承载 CVE 检测，适合作为统一发现引擎。
-    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe\" -u {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=nuclei_scan enabled=false\n'; fi"
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"{{ .vars.nuclei_binary_path }}\" -u {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=nuclei_scan enabled=false\n'; fi"
     parser: parsers/nuclei_scan.yaml
     variables:
       - name: enabled
@@ -129,6 +133,8 @@ tools:
         description: nuclei 参数串（不含 -u 与 -o），建议用模板目录表达发现逻辑。
     metadata:
       binary_path: /mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe
+      binary_var: nuclei_binary_path
+      binary_label: nuclei
       source: external-tools
 
   executor_placeholder:
@@ -163,7 +169,7 @@ tools:
   nuclei_path_scan:
     category: discovery
     description: 基于 nuclei 路径模板的路径发现扫描，发现 Web 应用的有效路径和 API 端点。
-    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"/mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe\" -u {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=nuclei_path_scan enabled=false\n'; fi"
+    command_template: "if [ \"{{ .inputs.enabled }}\" = \"true\" ]; then \"{{ .vars.nuclei_binary_path }}\" -u {{ .inputs.target }} {{ .inputs.extra_args }}; else printf 'SKIPPED stage=nuclei_path_scan enabled=false\n'; fi"
     parser: parsers/nuclei_path_scan.yaml
     variables:
       - name: enabled
@@ -179,6 +185,8 @@ tools:
         description: nuclei 路径扫描参数。
     metadata:
       binary_path: /mnt/h/tools/Penetration/tools/00 Assemble tool/nuclei/nuclei.exe
+      binary_var: nuclei_binary_path
+      binary_label: nuclei
       source: external-tools
 
   exp_execute:

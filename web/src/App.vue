@@ -1,33 +1,42 @@
 <template>
   <el-container class="app-layout">
     <el-aside width="200px" class="app-sidebar">
-      <div class="logo">
-        <h2>Penframe</h2>
-      </div>
-      <el-menu
-        :default-active="route.path"
-        router
-        background-color="#1d1e1f"
-        text-color="#c0c4cc"
-        active-text-color="#409eff"
-      >
-        <el-menu-item index="/projects">
-          <el-icon><Folder /></el-icon>
-          <span>Projects</span>
-        </el-menu-item>
-        <el-menu-item index="/assets">
-          <el-icon><Share /></el-icon>
-          <span>Asset Graph</span>
-        </el-menu-item>
-        <el-menu-item index="/exploit">
-          <el-icon><Lightning /></el-icon>
-          <span>Exploit</span>
-        </el-menu-item>
-      </el-menu>
-      <div class="sse-status">
-        <el-tag :type="sse.connected ? 'success' : 'danger'" size="small">
-          {{ sse.connected ? 'Connected' : 'Disconnected' }}
-        </el-tag>
+      <div class="sidebar-inner">
+        <div class="logo">
+          <h2>Penframe</h2>
+        </div>
+        <el-menu
+          :default-active="route.path"
+          router
+          background-color="#1d1e1f"
+          text-color="#c0c4cc"
+          active-text-color="#409eff"
+          class="sidebar-menu"
+        >
+          <el-menu-item index="/projects">
+            <el-icon><Folder /></el-icon>
+            <span>Projects</span>
+          </el-menu-item>
+          <el-menu-item index="/assets">
+            <el-icon><Share /></el-icon>
+            <span>Asset Graph</span>
+          </el-menu-item>
+          <el-menu-item index="/exploit">
+            <el-icon><Lightning /></el-icon>
+            <span>Exploit</span>
+          </el-menu-item>
+          <el-menu-item index="/config">
+            <el-icon><Setting /></el-icon>
+            <span>Config</span>
+          </el-menu-item>
+        </el-menu>
+        <div class="sidebar-bottom">
+          <div class="sse-status">
+            <el-tag :type="sse.connected ? 'success' : 'danger'" size="small">
+              {{ sse.connected ? 'Connected' : 'Disconnected' }}
+            </el-tag>
+          </div>
+        </div>
       </div>
     </el-aside>
     <el-main class="app-main">
@@ -39,7 +48,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Monitor, Share, Folder } from '@element-plus/icons-vue'
+import { Monitor, Share, Folder, Setting } from '@element-plus/icons-vue'
 import { useSSEStore } from '@/stores/sse'
 
 // Lightning icon placeholder since it may not exist in the icon pack.
@@ -80,7 +89,21 @@ html, body, #app {
 .app-sidebar {
   background: #1d1e1f;
   border-right: 1px solid #303030;
-  overflow-y: auto;
+}
+
+.sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.sidebar-menu {
+  border-right: none !important;
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+  padding-bottom: 16px;
 }
 
 .logo {
@@ -96,9 +119,7 @@ html, body, #app {
 }
 
 .sse-status {
-  position: absolute;
-  bottom: 16px;
-  left: 16px;
+  padding-left: 16px;
 }
 
 .app-main {
