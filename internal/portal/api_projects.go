@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"penframe/internal/project"
 )
 
 type createProjectRequest struct {
@@ -12,13 +14,15 @@ type createProjectRequest struct {
 }
 
 type addTargetRequest struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name         string                   `json:"name"`
+	URL          string                   `json:"url"`
+	VShellConfig *project.VShellConfig    `json:"vshell_config,omitempty"`
 }
 
 type updateTargetRequest struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name         string                   `json:"name"`
+	URL          string                   `json:"url"`
+	VShellConfig *project.VShellConfig    `json:"vshell_config,omitempty"`
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +186,7 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, proj
 	}
 	defer r.Body.Close()
 
-	if err := s.projects.UpdateTarget(targetID, req.Name, req.URL); err != nil {
+	if err := s.projects.UpdateTarget(targetID, req.Name, req.URL, req.VShellConfig); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to update target: %w", err))
 		return
 	}

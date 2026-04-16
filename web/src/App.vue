@@ -31,6 +31,15 @@
           </el-menu-item>
         </el-menu>
         <div class="sidebar-bottom">
+          <el-button
+            type="primary"
+            :icon="Monitor"
+            @click="vshellStore.toggle()"
+            class="vshell-toggle"
+            size="small"
+          >
+            VShell
+          </el-button>
           <div class="sse-status">
             <el-tag :type="sse.connected ? 'success' : 'danger'" size="small">
               {{ sse.connected ? 'Connected' : 'Disconnected' }}
@@ -42,6 +51,7 @@
     <el-main class="app-main">
       <router-view />
     </el-main>
+    <VShellPanel />
   </el-container>
 </template>
 
@@ -50,12 +60,15 @@ import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Monitor, Share, Folder, Setting } from '@element-plus/icons-vue'
 import { useSSEStore } from '@/stores/sse'
+import { useVShellStore } from '@/stores/vshell'
+import VShellPanel from '@/components/VShellPanel.vue'
 
 // Lightning icon placeholder since it may not exist in the icon pack.
 const Lightning = Monitor
 
 const route = useRoute()
 const sse = useSSEStore()
+const vshellStore = useVShellStore()
 
 onMounted(() => {
   console.log('[App] Component mounted, route:', route.path)
@@ -103,7 +116,14 @@ html, body, #app {
 
 .sidebar-bottom {
   margin-top: auto;
-  padding-bottom: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vshell-toggle {
+  width: 100%;
 }
 
 .logo {
@@ -119,7 +139,8 @@ html, body, #app {
 }
 
 .sse-status {
-  padding-left: 16px;
+  display: flex;
+  justify-content: center;
 }
 
 .app-main {

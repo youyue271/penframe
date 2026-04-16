@@ -36,7 +36,7 @@ export async function put<T>(path: string, body?: any): Promise<T> {
   return resp.json()
 }
 
-export async function del(path: string): Promise<void> {
+export async function del<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'DELETE',
   })
@@ -44,6 +44,7 @@ export async function del(path: string): Promise<void> {
     const text = await resp.text()
     throw new Error(`DELETE ${path} failed: ${resp.status} - ${text}`)
   }
+  return resp.json()
 }
 
 export function createSSE(path: string): EventSource {

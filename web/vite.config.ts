@@ -12,6 +12,34 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // Shell API routes to Python Exp service
+      '/api/v1/shell': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      // VShell API routes to Python Exp service
+      '/api/v1/vshell': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      // Exploit API routes to Python Exp service
+      '/api/v1/exploits': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      '/api/v1/check': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      '/api/v1/execute': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      '/api/v1/health': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      // All other API routes to Go service
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,

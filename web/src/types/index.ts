@@ -177,6 +177,11 @@ export interface Target {
   url: string
   created_at: string
   last_scanned?: string
+  vshell_config?: {
+    enabled?: boolean
+    host?: string
+    port?: number
+  }
 }
 
 export interface ProjectItem {

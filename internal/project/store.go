@@ -11,13 +11,21 @@ import (
 	"time"
 )
 
+type VShellConfig struct {
+	Enabled    bool   `json:"enabled,omitempty"`
+	ListenerID string `json:"listener_id,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+}
+
 type Target struct {
-	ID          string    `json:"id"`
-	ProjectID   string    `json:"project_id"`
-	Name        string    `json:"name"`
-	URL         string    `json:"url"`
-	CreatedAt   time.Time `json:"created_at"`
-	LastScanned time.Time `json:"last_scanned,omitempty"`
+	ID           string        `json:"id"`
+	ProjectID    string        `json:"project_id"`
+	Name         string        `json:"name"`
+	URL          string        `json:"url"`
+	CreatedAt    time.Time     `json:"created_at"`
+	LastScanned  time.Time     `json:"last_scanned,omitempty"`
+	VShellConfig *VShellConfig `json:"vshell_config,omitempty"`
 }
 
 type Project struct {
@@ -160,7 +168,7 @@ func (s *Store) GetTarget(targetID string) (Target, error) {
 	return Target{}, fmt.Errorf("target not found: %s", targetID)
 }
 
-func (s *Store) UpdateTarget(targetID string, name, url string) error {
+func (s *Store) UpdateTarget(targetID string, name, url string, vshellConfig *VShellConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -172,6 +180,9 @@ func (s *Store) UpdateTarget(targetID string, name, url string) error {
 				}
 				if url != "" {
 					s.projects[i].Targets[j].URL = url
+				}
+				if vshellConfig != nil {
+					s.projects[i].Targets[j].VShellConfig = vshellConfig
 				}
 				return s.save()
 			}
