@@ -78,6 +78,26 @@ export interface GenerateShellcodeRequest {
   ebpf?: boolean
 }
 
+export interface AddClientRequest {
+  ip: string
+  port: number
+  tp?: string
+  vkey?: string
+  salt?: string
+  ebpf?: boolean
+}
+
+export interface DownloadListenPayloadRequest {
+  arch: string
+  tp?: string
+  host?: string
+  port: number
+  vkey?: string
+  salt?: string
+  upx?: boolean
+  ebpf?: boolean
+}
+
 export interface ListListenersResponse {
   listeners: VShellListener[]
   total: number
@@ -113,6 +133,30 @@ export async function generateShellcode(request: GenerateShellcodeRequest): Prom
 
   if (!response.ok) {
     throw new Error(`Failed to generate shellcode: ${response.statusText}`)
+  }
+
+  return response.blob()
+}
+
+export async function addClient(request: AddClientRequest): Promise<{ success: boolean; error?: string }> {
+  return post('/api/v1/vshell/client/add', request)
+}
+
+export async function downloadListenPayload(request: DownloadListenPayloadRequest): Promise<Blob> {
+  const params = new URLSearchParams()
+  params.append('arch', request.arch)
+  params.append('port', request.port.toString())
+  if (request.tp) params.append('tp', request.tp)
+  if (request.host) params.append('host', request.host)
+  if (request.vkey) params.append('vkey', request.vkey)
+  if (request.salt) params.append('salt', request.salt)
+  if (request.upx !== undefined) params.append('upx', request.upx.toString())
+  if (request.ebpf !== undefined) params.append('ebpf', request.ebpf.toString())
+
+  const response = await fetch(`/api/v1/vshell/download/listen?${params.toString()}`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to download listen payload: ${response.statusText}`)
   }
 
   return response.blob()

