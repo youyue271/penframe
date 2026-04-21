@@ -168,6 +168,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("/api/reload", s.handleReload)
 	s.mux.HandleFunc("/api/runs", s.handleRuns)
 	s.mux.HandleFunc("/api/runs/", s.handleRunByID)
+	s.mux.HandleFunc("/api/output-files/", s.handleOutputFiles)
 	s.mux.HandleFunc("/api/config/tool-paths", s.handleToolPathConfig)
 	s.mux.HandleFunc("/api/tool-files", s.handleToolFiles)
 
@@ -457,6 +458,182 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":   "ok",
 		"workflow": wf.Name,
 	})
+}
+
+type outputFileEntry struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	SizeBytes int64  `json:"size_bytes"`
+	Type      string `json:"type"`
+	IsJSONL   bool   `json:"is_jsonl"`
+}
+
+type outputFilesResponse struct {
+	RunID  string            `json:"run_id"`
+	Files  []outputFileEntry `json:"files"`
+	Output string            `json:"output_dir"`
+}
+
+type fileContentResponse struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`
+	Content string   `json:"content,omitempty"`
+	Lines   []string `json:"lines,omitempty"`
+}
+
+func (s *Server) handleOutputFiles(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/output-files/")
+	parts := strings.SplitN(path, "/", 2)
+
+	if len(parts) == 0 || parts[0] == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("run ID required"))
+		return
+	}
+
+	runID := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		s.handleListOutputFiles(w, runID)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	filename := parts[1]
+	s.handleReadOutputFile(w, runID, filename)
+}
+
+func (s *Server) handleListOutputFiles(w http.ResponseWriter, runID string) {
+	run, ok := s.store.GetStoredRun(runID)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("run not found: %s", runID))
+		return
+	}
+
+	outputDir := run.Summary.Vars["output_dir"]
+	if outputDir == nil {
+		writeJSON(w, http.StatusOK, outputFilesResponse{
+			RunID:  runID,
+			Files:  []outputFileEntry{},
+			Output: "",
+		})
+		return
+	}
+
+	outputPath := fmt.Sprintf("%v", outputDir)
+	entries, err := os.ReadDir(outputPath)
+	if err != nil {
+		writeJSON(w, http.StatusOK, outputFilesResponse{
+			RunID:  runID,
+			Files:  []outputFileEntry{},
+			Output: outputPath,
+		})
+		return
+	}
+
+	files := make([]outputFileEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		name := entry.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		fileType := "text"
+		isJSONL := false
+
+		if ext == ".jsonl" {
+			fileType = "jsonl"
+			isJSONL = true
+		} else if ext == ".json" {
+			fileType = "json"
+		} else if ext == ".txt" {
+			fileType = "text"
+		}
+
+		files = append(files, outputFileEntry{
+			Name:      name,
+			Path:      filepath.Join(outputPath, name),
+			SizeBytes: info.Size(),
+			Type:      fileType,
+			IsJSONL:   isJSONL,
+		})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name < files[j].Name
+	})
+
+	writeJSON(w, http.StatusOK, outputFilesResponse{
+		RunID:  runID,
+		Files:  files,
+		Output: outputPath,
+	})
+}
+
+func (s *Server) handleReadOutputFile(w http.ResponseWriter, runID, filename string) {
+	run, ok := s.store.GetStoredRun(runID)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("run not found: %s", runID))
+		return
+	}
+
+	outputDir := run.Summary.Vars["output_dir"]
+	if outputDir == nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("output directory not found"))
+		return
+	}
+
+	outputPath := fmt.Sprintf("%v", outputDir)
+	filePath := filepath.Join(outputPath, filepath.Base(filename))
+
+	if !strings.HasPrefix(filePath, outputPath) {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid file path"))
+		return
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("file not found: %s", filename))
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
+	fileType := "text"
+
+	response := fileContentResponse{
+		Name: filename,
+		Type: fileType,
+	}
+
+	if ext == ".jsonl" {
+		response.Type = "jsonl"
+		lines := strings.Split(string(content), "\n")
+		validLines := make([]string, 0, len(lines))
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				validLines = append(validLines, line)
+			}
+		}
+		response.Lines = validLines
+	} else {
+		response.Content = string(content)
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleToolFiles(w http.ResponseWriter, r *http.Request) {

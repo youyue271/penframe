@@ -78,6 +78,8 @@
           <div id="reconSummary" class="stack-list"></div>
         </section>
 
+        <div id="outputFilesSection"></div>
+
         <section class="card">
           <h2>调用工具与执行命令</h2>
           <div id="toolCalls" class="stack-list scroll-panel"></div>
@@ -101,8 +103,9 @@
             <div id="runList" class="stack-list scroll-panel"></div>
           </section>
 
-          <section class="card">
-            <h2>选中任务 JSON</h2>
+          <section class="card" id="runDetailPanel">
+            <h2 id="runDetailTitle">选中任务 JSON</h2>
+            <div id="fileViewer" style="display: none;"></div>
             <pre id="selectedRunJson" class="code-block">{}</pre>
           </section>
         </div>

@@ -9,6 +9,9 @@ const state = {
   runInProgress: false,
   runStartedAt: 0,
   eventSource: null,
+  viewMode: "graph",
+  selectedFile: null,
+  outputFiles: [],
   chain: {
     run_asset_seed: true,
     run_host_discovery: true,
@@ -407,6 +410,7 @@ function renderTaskPanel(run) {
   renderChainLayout();
   renderChainPreview(run);
   renderReconSummary(run);
+  renderOutputFiles(run);
   renderToolCalls(run);
   renderRawOutputs(run);
   renderParsedOutput(run);
@@ -1471,7 +1475,23 @@ function normalizeString(value) {
 
 function renderRunPanel(run) {
   renderRunList();
-  selectedRunJsonEl.textContent = run ? JSON.stringify(run.summary, null, 2) : "{}";
+
+  const fileViewer = document.getElementById("fileViewer");
+  const selectedRunJson = document.getElementById("selectedRunJson");
+  const runDetailTitle = document.getElementById("runDetailTitle");
+
+  if (state.viewMode === "file" && state.selectedFile) {
+    if (fileViewer) fileViewer.style.display = "block";
+    if (selectedRunJson) selectedRunJson.style.display = "none";
+    if (runDetailTitle) runDetailTitle.textContent = "文件查看器";
+  } else {
+    if (fileViewer) fileViewer.style.display = "none";
+    if (selectedRunJson) {
+      selectedRunJson.style.display = "block";
+      selectedRunJson.textContent = run ? JSON.stringify(run.summary, null, 2) : "{}";
+    }
+    if (runDetailTitle) runDetailTitle.textContent = "选中任务 JSON";
+  }
 }
 
 function renderRunList() {
@@ -1574,6 +1594,118 @@ function stopRunProgressHint() {
     window.clearInterval(runProgressTimer);
     runProgressTimer = null;
   }
+}
+
+function renderOutputFiles(run) {
+  const container = document.getElementById("outputFilesSection");
+  if (!container) {
+    return;
+  }
+
+  if (!run || !state.outputFiles || state.outputFiles.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const fileItems = state.outputFiles.map((file) => {
+    const sizeKB = (file.size_bytes / 1024).toFixed(1);
+    const typeLabel = file.is_jsonl ? "JSONL" : file.type.toUpperCase();
+    const active = state.selectedFile === file.name ? "active" : "";
+    return `
+      <article class="item file-item ${active}" data-output-file="${escapeHTML(file.name)}">
+        <div class="item-head">
+          <div class="item-title">${escapeHTML(file.name)}</div>
+          <span class="chip">${typeLabel}</span>
+        </div>
+        <p class="item-meta">${sizeKB} KB</p>
+      </article>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <section class="card">
+      <h2>扫描报告文件</h2>
+      <div class="stack-list scroll-panel">${fileItems}</div>
+    </section>
+  `;
+}
+
+async function loadOutputFiles(runId) {
+  if (!runId) {
+    state.outputFiles = [];
+    return;
+  }
+
+  try {
+    const response = await fetchJSON(`/api/output-files/${runId}`);
+    state.outputFiles = response.files || [];
+  } catch (error) {
+    state.outputFiles = [];
+  }
+}
+
+async function loadAndDisplayFile(runId, filename) {
+  if (!runId || !filename) {
+    return;
+  }
+
+  state.viewMode = "file";
+  state.selectedFile = filename;
+  render();
+
+  try {
+    const response = await fetchJSON(`/api/output-files/${runId}/${encodeURIComponent(filename)}`);
+    displayFileContent(response);
+  } catch (error) {
+    const viewer = document.getElementById("fileViewer");
+    if (viewer) {
+      viewer.innerHTML = `<div class="empty">加载文件失败: ${escapeHTML(error.message)}</div>`;
+    }
+  }
+}
+
+function displayFileContent(fileData) {
+  const viewer = document.getElementById("fileViewer");
+  if (!viewer) {
+    return;
+  }
+
+  const downloadBtn = `<button class="btn btn-secondary" onclick="downloadFile('${escapeHTML(fileData.name)}')">下载文件</button>`;
+
+  if (fileData.type === "jsonl" && fileData.lines) {
+    const formatted = fileData.lines.map((line, idx) => {
+      try {
+        const obj = JSON.parse(line);
+        return `<div class="jsonl-entry"><strong>Entry ${idx + 1}:</strong><pre>${escapeHTML(JSON.stringify(obj, null, 2))}</pre></div>`;
+      } catch {
+        return `<div class="jsonl-entry"><pre>${escapeHTML(line)}</pre></div>`;
+      }
+    }).join("");
+
+    viewer.innerHTML = `
+      <div class="file-viewer-header">
+        <h3>${escapeHTML(fileData.name)}</h3>
+        ${downloadBtn}
+      </div>
+      <div class="file-content jsonl-content">${formatted}</div>
+    `;
+  } else {
+    viewer.innerHTML = `
+      <div class="file-viewer-header">
+        <h3>${escapeHTML(fileData.name)}</h3>
+        ${downloadBtn}
+      </div>
+      <pre class="file-content code-block">${escapeHTML(fileData.content || "")}</pre>
+    `;
+  }
+}
+
+function downloadFile(filename) {
+  if (!state.selectedRunId || !filename) {
+    return;
+  }
+  const url = `/api/output-files/${state.selectedRunId}/${encodeURIComponent(filename)}`;
+  window.open(url, '_blank');
 }
 
 async function runTask() {
@@ -1808,7 +1940,19 @@ runListEl.addEventListener("click", (event) => {
     return;
   }
   state.selectedRunId = item.dataset.runId || null;
+  state.viewMode = "graph";
+  state.selectedFile = null;
+  loadOutputFiles(state.selectedRunId);
   render();
+});
+
+document.addEventListener("click", (event) => {
+  const fileItem = event.target.closest("[data-output-file]");
+  if (fileItem) {
+    const filename = fileItem.dataset.outputFile;
+    loadAndDisplayFile(state.selectedRunId, filename);
+    return;
+  }
 });
 
 loadState().then(() => {

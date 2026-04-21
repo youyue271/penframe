@@ -233,6 +233,59 @@
         <div v-if="!assetStore.loading && assetStore.hosts.length === 0" class="empty-hint">
           No assets discovered yet. Run a scan to discover assets.
         </div>
+
+        <el-card v-if="scanResult" shadow="hover" class="workspace-card">
+          <template #header>
+            <div class="section-header">
+              <span>输出文件</span>
+              <el-button size="small" @click="loadOutputFiles" :loading="loadingFiles">刷新</el-button>
+            </div>
+          </template>
+          <el-table v-if="outputFiles.length" :data="outputFiles" size="small" stripe>
+            <el-table-column prop="name" label="文件名" min-width="200">
+              <template #default="{ row }">
+                <el-link type="primary" @click="viewFile(row)">{{ row.name }}</el-link>
+              </template>
+            </el-table-column>
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column label="大小" width="120">
+              <template #default="{ row }">
+                {{ formatFileSize(row.size_bytes) }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else-if="!loadingFiles" class="empty-hint">暂无输出文件</div>
+
+          <div v-if="selectedFileName" style="margin-top: 16px;">
+            <el-divider />
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-weight: 500;">{{ selectedFileName }}</span>
+              <el-button size="small" @click="clearFileView">关闭</el-button>
+            </div>
+            <div v-if="fileEntries" class="jsonl-viewer">
+              <el-collapse accordion>
+                <el-collapse-item v-for="(entry, idx) in fileEntries" :key="idx" :name="idx">
+                  <template #title>
+                    <span>{{ entry['template-id'] || `Entry ${idx + 1}` }}</span>
+                  </template>
+                  <el-input
+                    type="textarea"
+                    :model-value="JSON.stringify(entry, null, 2)"
+                    :autosize="{ minRows: 4, maxRows: 20 }"
+                    readonly
+                  />
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+            <el-input
+              v-else
+              type="textarea"
+              :model-value="fileContent"
+              :autosize="{ minRows: 6, maxRows: 30 }"
+              readonly
+            />
+          </div>
+        </el-card>
       </el-tab-pane>
 
       <el-tab-pane label="Exploit" name="exploit">
@@ -478,7 +531,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getProjectTargets, updateTarget, type Target } from '@/api/target'
-import { fetchLatestTargetRun, startScan as startScanAPI } from '@/api/scan'
+import { fetchLatestTargetRun, startScan as startScanAPI, fetchOutputFiles, fetchOutputFileContent } from '@/api/scan'
 import { listExploits, triggerExploit, type ExploitInfo } from '@/api/exploit'
 import { useAssetStore } from '@/stores/asset'
 import type { ExploitOption } from '@/types'
@@ -522,6 +575,12 @@ const activeTab = ref('scan')
 const scanning = ref(false)
 const scanResult = ref<any>(null)
 const exploits = ref<ExploitInfo[]>([])
+
+const outputFiles = ref<any[]>([])
+const loadingFiles = ref(false)
+const selectedFileName = ref('')
+const fileContent = ref('')
+const fileEntries = ref<any[] | null>(null)
 
 const targetName = ref('')
 const targetUrl = ref('')
@@ -1045,6 +1104,7 @@ async function restoreLatestScan() {
       run: latestRun,
     }
     await assetStore.load(latestRun.id)
+    await loadOutputFiles()
   } catch (e: any) {
     ElMessage.warning(`Failed to restore latest scan: ${e.message}`)
   }
@@ -1062,6 +1122,7 @@ async function startScan() {
     })
     scanResult.value = result
     await assetStore.load(result.run_id)
+    await loadOutputFiles()
     ElMessage.success('Scan started')
   } catch (e: any) {
     ElMessage.error(`Scan failed: ${e.message}`)
@@ -1076,6 +1137,62 @@ async function loadAssets() {
     return
   }
   await assetStore.load(scanResult.value.run_id)
+}
+
+async function loadOutputFiles() {
+  if (!scanResult.value?.run_id) {
+    ElMessage.warning('No scan results available')
+    return
+  }
+
+  loadingFiles.value = true
+  try {
+    const result = await fetchOutputFiles(scanResult.value.run_id)
+    outputFiles.value = result.files || []
+  } catch (e: any) {
+    ElMessage.error(`Failed to load output files: ${e.message}`)
+  } finally {
+    loadingFiles.value = false
+  }
+}
+
+async function viewFile(file: any) {
+  if (!scanResult.value?.run_id) return
+
+  try {
+    const result = await fetchOutputFileContent(scanResult.value.run_id, file.name)
+    selectedFileName.value = file.name
+
+    if (result.lines && result.lines.length > 0) {
+      // JSONL file - parse each line as JSON
+      fileEntries.value = result.lines.map((line: string) => {
+        try {
+          return JSON.parse(line)
+        } catch {
+          return { raw: line }
+        }
+      })
+      fileContent.value = ''
+    } else {
+      // Regular text file
+      fileContent.value = result.content || ''
+      fileEntries.value = null
+    }
+  } catch (e: any) {
+    ElMessage.error(`Failed to load file: ${e.message}`)
+  }
+}
+
+function clearFileView() {
+  selectedFileName.value = ''
+  fileContent.value = ''
+  fileEntries.value = null
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 async function loadExploits() {

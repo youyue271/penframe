@@ -11,6 +11,12 @@ export interface RunQuery {
   targetId?: string
 }
 
+export interface OutputFile {
+  name: string
+  size_bytes: number
+  type: string
+}
+
 export function startScan(req: ScanRequestWithContext): Promise<ScanResponse> {
   return post<ScanResponse>('/api/scan', req)
 }
@@ -42,4 +48,12 @@ export function fetchState(): Promise<PortalStateResponse> {
 
 export function reloadConfig(): Promise<any> {
   return post<any>('/api/reload')
+}
+
+export function fetchOutputFiles(runId: string): Promise<{ files: OutputFile[] }> {
+  return get<{ files: OutputFile[] }>(`/api/output-files/${runId}`)
+}
+
+export function fetchOutputFileContent(runId: string, filename: string): Promise<{ content?: string, lines?: string[] }> {
+  return get<{ content?: string, lines?: string[] }>(`/api/output-files/${runId}/${encodeURIComponent(filename)}`)
 }
