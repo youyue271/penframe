@@ -14,7 +14,6 @@
         :data="targets"
         style="width: 100%"
         size="default"
-        stripe
         @row-click="openTarget"
       >
         <el-table-column prop="name" label="Target Name" width="250" />
@@ -200,33 +199,203 @@ onMounted(() => {
 
 <style scoped>
 .dashboard {
-  padding: 20px;
+  padding: 0;
+  animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .dashboard-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 32px;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.05), rgba(168, 85, 247, 0.05));
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  box-shadow: var(--pf-shadow-md);
+  position: relative;
+  overflow: hidden;
+}
+
+.dashboard-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0, 217, 255, 0.1), transparent);
+  animation: shimmer 3s infinite;
+}
+
+@keyframes shimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
 }
 
 .dashboard-header h1 {
-  color: #e5e5e5;
+  font-family: 'Orbitron', 'JetBrains Mono', monospace;
+  color: var(--pf-text-primary);
   margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #88a8b8, var(--pf-text-primary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
 }
 
 .dashboard-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .targets-card {
   margin-bottom: 20px;
+  background: var(--pf-bg-elevated);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--pf-shadow-md);
+  transition: all 0.3s ease;
+}
+
+.targets-card:hover {
+  border-color: rgba(0, 217, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 217, 255, 0.1);
+}
+
+.targets-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.targets-card :deep(.el-table) {
+  background: transparent;
+  color: var(--pf-text-primary);
+}
+
+.targets-card :deep(.el-table__header-wrapper) {
+  background: var(--pf-bg-surface);
+}
+
+.targets-card :deep(.el-table th) {
+  background: var(--pf-bg-surface);
+  color: #88a8b8;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--pf-border);
+}
+
+.targets-card :deep(.el-table td) {
+  border-bottom: 1px solid var(--pf-border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+.targets-card :deep(.el-table__row) {
+  background: var(--pf-bg-elevated);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.targets-card :deep(.el-table__row:hover) {
+  background: var(--pf-bg-hover) !important;
+}
+
+.targets-card :deep(.el-table__body tr) {
+  background: var(--pf-bg-elevated) !important;
+}
+
+.targets-card :deep(.el-table__body tr:hover) {
+  background: var(--pf-bg-hover) !important;
 }
 
 .empty-hint {
   text-align: center;
-  padding: 40px;
-  color: #909399;
+  padding: 60px 40px;
+  color: var(--pf-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.02), rgba(168, 85, 247, 0.02));
+  border-radius: var(--pf-radius);
+}
+
+/* Dialog styling */
+:deep(.el-dialog) {
+  background: var(--pf-bg-elevated);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 217, 255, 0.2);
+}
+
+:deep(.el-dialog__header) {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.1), rgba(168, 85, 247, 0.1));
+  border-bottom: 1px solid var(--pf-border);
+  padding: 20px 24px;
+}
+
+:deep(.el-dialog__title) {
+  font-family: 'Orbitron', 'JetBrains Mono', monospace;
+  color: var(--pf-accent-cyan);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+:deep(.el-dialog__body) {
+  padding: 24px;
+}
+
+:deep(.el-form-item__label) {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--pf-text-secondary);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+:deep(.el-input__wrapper) {
+  background: var(--pf-bg-surface);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+:deep(.el-input__wrapper:hover) {
+  border-color: var(--pf-border-light);
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  border-color: var(--pf-accent-cyan);
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+:deep(.el-input__inner) {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--pf-text-primary);
+  font-size: 13px;
 }
 </style>

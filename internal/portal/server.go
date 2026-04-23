@@ -18,6 +18,7 @@ import (
 
 	"penframe/internal/asset"
 	"penframe/internal/config"
+	"penframe/internal/cveindex"
 	"penframe/internal/domain"
 	"penframe/internal/executor"
 	"penframe/internal/parser"
@@ -49,6 +50,7 @@ type Server struct {
 	mux          *http.ServeMux
 	assets       *asset.Store
 	projects     *project.Store
+	cveStore     *cveindex.Store
 	expExecutor  *executor.ExpExecutor
 	handler      http.Handler
 }
@@ -130,6 +132,11 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL str
 		return nil, err
 	}
 
+	cveStore, err := cveindex.NewStore(filepath.Join(".penframe", "tested.json"))
+	if err != nil {
+		return nil, err
+	}
+
 	server := &Server{
 		toolsPath:    toolsPath,
 		workflowPath: workflowPath,
@@ -142,6 +149,7 @@ func newServerWithExternalRoot(toolsPath, workflowPath, externalRoot, expURL str
 		mux:          http.NewServeMux(),
 		assets:       asset.NewStore(),
 		projects:     projectStore,
+		cveStore:     cveStore,
 	}
 
 	if expURL != "" {
@@ -196,6 +204,9 @@ func (s *Server) routes() error {
 	})
 	s.mux.HandleFunc("/api/exploit", s.handleExploit)
 	s.mux.HandleFunc("/api/exploits", s.handleExploitsList)
+	s.mux.HandleFunc("/api/cves", s.handleCVEs)
+	s.mux.HandleFunc("/api/cves/", s.handleCVETested)
+	s.mux.HandleFunc("/api/cve-tags", s.handleCVETags)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
 
 	s.mux.HandleFunc("/healthz", s.handleHealth)

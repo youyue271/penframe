@@ -338,54 +338,54 @@ function initCytoscape() {
           'text-valign': 'bottom',
           'text-halign': 'center',
           'font-size': '10px',
-          color: '#c0c4cc',
+          color: '#6b5f56',
           'text-margin-y': 4,
-          'background-color': '#606266',
+          'background-color': '#9a8e84',
           width: 30,
           height: 30,
         },
       },
       {
         selector: 'node.target',
-        style: { 'background-color': '#409eff', width: 50, height: 50, 'font-size': '12px' },
+        style: { 'background-color': '#6b8cbe', width: 50, height: 50, 'font-size': '12px' },
       },
       {
         selector: 'node.host',
-        style: { 'background-color': '#67c23a', width: 40, height: 40 },
+        style: { 'background-color': '#6a9e7a', width: 40, height: 40 },
       },
       {
         selector: 'node.port',
-        style: { 'background-color': '#e6a23c', width: 30, height: 30 },
+        style: { 'background-color': '#c49a4a', width: 30, height: 30 },
       },
       {
         selector: 'node.path',
-        style: { 'background-color': '#909399', width: 24, height: 24 },
+        style: { 'background-color': '#9a8e84', width: 24, height: 24 },
       },
       {
         selector: 'node.vuln',
-        style: { 'background-color': '#f56c6c', width: 28, height: 28, shape: 'diamond' },
+        style: { 'background-color': '#c06060', width: 28, height: 28, shape: 'diamond' },
       },
       {
         selector: 'node.vuln.vuln-critical',
-        style: { 'background-color': '#ff0000', width: 34, height: 34 },
+        style: { 'background-color': '#b04040', width: 34, height: 34 },
       },
       {
         selector: 'node.exploitable',
-        style: { 'border-width': 3, 'border-color': '#ff4500' },
+        style: { 'border-width': 3, 'border-color': '#c06060' },
       },
       {
         selector: 'edge',
         style: {
           width: 1.5,
-          'line-color': '#404040',
-          'target-arrow-color': '#404040',
+          'line-color': '#d4ccc2',
+          'target-arrow-color': '#d4ccc2',
           'target-arrow-shape': 'triangle',
           'curve-style': 'bezier',
         },
       },
       {
         selector: ':selected',
-        style: { 'border-width': 3, 'border-color': '#409eff' },
+        style: { 'border-width': 3, 'border-color': '#6b8cbe' },
       },
     ],
     layout: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true },
@@ -464,8 +464,8 @@ onUnmounted(() => {
 
 .sidebar {
   width: 280px;
-  background: #1d1e1f;
-  border-right: 1px solid #303030;
+  background: var(--pf-bg-surface);
+  border: 1px solid var(--pf-border);
   padding: 16px;
   overflow-y: auto;
 }
@@ -475,7 +475,7 @@ onUnmounted(() => {
 }
 
 .sidebar-section h3 {
-  color: #e5e5e5;
+  color: var(--pf-text-primary);
   font-size: 14px;
   margin-bottom: 12px;
 }
@@ -489,32 +489,32 @@ onUnmounted(() => {
 .target-item {
   padding: 10px;
   margin-bottom: 8px;
-  background: #141414;
-  border: 1px solid #303030;
+  background: var(--pf-bg-base);
+  border: 1px solid var(--pf-border);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .target-item:hover {
-  border-color: #409eff;
-  background: #1a1a1a;
+  border-color: var(--pf-accent-cyan);
+  background: var(--pf-bg-elevated);
 }
 
 .target-item.active {
-  border-color: #409eff;
-  background: #1a2332;
+  border-color: var(--pf-accent-cyan);
+  background: var(--pf-bg-active);
 }
 
 .target-name {
-  color: #e5e5e5;
+  color: var(--pf-text-primary);
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 4px;
 }
 
 .target-url {
-  color: #909399;
+  color: var(--pf-text-muted);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -524,7 +524,7 @@ onUnmounted(() => {
 .empty-hint {
   text-align: center;
   padding: 20px;
-  color: #606266;
+  color: var(--pf-text-dim);
   font-size: 12px;
 }
 
@@ -556,8 +556,8 @@ onUnmounted(() => {
 
 .host-item {
   padding: 12px;
-  background: #141414;
-  border: 1px solid #303030;
+  background: var(--pf-bg-base);
+  border: 1px solid var(--pf-border);
   border-radius: 4px;
 }
 
@@ -569,7 +569,7 @@ onUnmounted(() => {
 }
 
 .host-domain {
-  color: #909399;
+  color: var(--pf-text-muted);
   font-size: 12px;
 }
 
@@ -582,7 +582,7 @@ onUnmounted(() => {
 .port-list {
   margin-top: 8px;
   padding-left: 12px;
-  border-left: 2px solid #303030;
+  border-left: 2px solid var(--pf-border);
 }
 
 .port-item {
@@ -600,12 +600,12 @@ onUnmounted(() => {
 }
 
 .port-service {
-  color: #909399;
+  color: var(--pf-text-muted);
   flex: 1;
 }
 
 .more-hint {
-  color: #606266;
+  color: var(--pf-text-dim);
   font-size: 11px;
   padding: 4px 0;
   font-style: italic;
@@ -613,8 +613,8 @@ onUnmounted(() => {
 
 .vuln-item {
   padding: 10px;
-  background: #141414;
-  border: 1px solid #303030;
+  background: var(--pf-bg-base);
+  border: 1px solid var(--pf-border);
   border-radius: 4px;
 }
 
@@ -626,13 +626,13 @@ onUnmounted(() => {
 }
 
 .vuln-name {
-  color: #e5e5e5;
+  color: var(--pf-text-primary);
   font-size: 13px;
   font-weight: 500;
 }
 
 .vuln-target {
-  color: #909399;
+  color: var(--pf-text-muted);
   font-size: 11px;
   margin-bottom: 4px;
 }
@@ -649,7 +649,7 @@ onUnmounted(() => {
 }
 
 .graph-header h1 {
-  color: #e5e5e5;
+  color: var(--pf-text-primary);
 }
 
 .graph-controls {
@@ -661,7 +661,7 @@ onUnmounted(() => {
 .graph-container {
   flex: 1;
   position: relative;
-  border: 1px solid #303030;
+  border: 1px solid var(--pf-border);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -669,7 +669,7 @@ onUnmounted(() => {
 .cy-container {
   width: 100%;
   height: 100%;
-  background: #0d0d0d;
+  background: var(--pf-bg-terminal);
 }
 
 .node-detail {
@@ -678,8 +678,8 @@ onUnmounted(() => {
   right: 0;
   width: 320px;
   height: 100%;
-  background: #1d1e1f;
-  border-left: 1px solid #303030;
+  background: var(--pf-bg-surface);
+  border: 1px solid var(--pf-border);
   padding: 16px;
   overflow-y: auto;
 }
@@ -692,7 +692,7 @@ onUnmounted(() => {
 }
 
 .detail-header h3 {
-  color: #e5e5e5;
+  color: var(--pf-text-primary);
   font-size: 14px;
 }
 

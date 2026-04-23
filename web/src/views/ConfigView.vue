@@ -201,27 +201,77 @@ onMounted(() => {
 .config-view {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+  animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .config-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.05), rgba(168, 85, 247, 0.05));
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  box-shadow: var(--pf-shadow-md);
 }
 
 .config-header h1 {
   margin: 0;
-  color: #e5e5e5;
+  font-family: 'Orbitron', 'JetBrains Mono', monospace;
+  color: var(--pf-text-primary);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #88a8b8, var(--pf-text-primary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .config-subtitle {
   margin-top: 8px;
-  color: #909399;
+  color: var(--pf-text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.5px;
 }
 
 .config-card {
-  border-radius: 10px;
+  border-radius: var(--pf-radius-lg);
+  background: var(--pf-bg-elevated);
+  border: 1px solid var(--pf-border);
+  box-shadow: var(--pf-shadow-md);
+  transition: all 0.3s ease;
+}
+
+.config-card:hover {
+  border-color: rgba(0, 217, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 217, 255, 0.1);
+}
+
+.config-card :deep(.el-card__header) {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.08), rgba(168, 85, 247, 0.08));
+  border-bottom: 1px solid var(--pf-border);
+  padding: 16px 20px;
+  font-family: 'Orbitron', 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pf-accent-cyan);
 }
 
 .card-header {
@@ -234,24 +284,98 @@ onMounted(() => {
 .field-meta {
   display: flex;
   gap: 12px;
-  font-size: 12px;
-  color: #909399;
+  font-size: 11px;
+  color: var(--pf-text-muted);
   margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.5px;
 }
 
 .field-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--pf-text-secondary);
   margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.3px;
 }
 
 .compat-list {
   margin-left: 18px;
-  color: #c0c4cc;
+  color: var(--pf-text-secondary);
   line-height: 1.8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+.compat-list li {
+  margin: 8px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--pf-accent-cyan);
 }
 
 .empty-hint {
-  color: #909399;
+  color: var(--pf-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  text-align: center;
+  padding: 20px;
+}
+
+:deep(.el-form-item__label) {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--pf-text-secondary);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+:deep(.el-input__wrapper) {
+  background: var(--pf-bg-surface);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+:deep(.el-input__wrapper:hover) {
+  border-color: var(--pf-border-light);
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  border-color: var(--pf-accent-cyan);
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+:deep(.el-input__inner) {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--pf-text-primary);
+  font-size: 13px;
+}
+
+:deep(.el-switch) {
+  --el-switch-on-color: var(--pf-accent-cyan);
+}
+
+:deep(.el-input-number) {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+:deep(.el-alert) {
+  background: rgba(0, 217, 255, 0.05);
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: var(--pf-radius);
+}
+
+:deep(.el-alert__title) {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--pf-accent-cyan);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+:deep(.el-alert ol) {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--pf-text-secondary);
+  line-height: 1.8;
 }
 </style>

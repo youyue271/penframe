@@ -136,7 +136,7 @@
                 </div>
               </template>
 
-              <el-table v-if="host.ports && host.ports.length > 0" :data="host.ports" size="small" stripe>
+              <el-table v-if="host.ports && host.ports.length > 0" :data="host.ports" size="small">
                 <el-table-column prop="port" label="Port" width="80" />
                 <el-table-column prop="service" label="Service" width="120" />
                 <el-table-column prop="protocol" label="Protocol" width="100" />
@@ -184,7 +184,7 @@
               <el-tag type="danger">{{ exploitableVulnerabilityCount }} exploitable</el-tag>
             </div>
           </template>
-          <el-table :data="allVulnerabilities" row-key="id" size="small" stripe>
+          <el-table :data="allVulnerabilities" row-key="id" size="small">
             <el-table-column type="expand" width="56">
               <template #default="{ row }">
                 <div class="vuln-group-expand">
@@ -241,7 +241,7 @@
               <el-button size="small" @click="loadOutputFiles" :loading="loadingFiles">刷新</el-button>
             </div>
           </template>
-          <el-table v-if="outputFiles.length" :data="outputFiles" size="small" stripe>
+          <el-table v-if="outputFiles.length" :data="outputFiles" size="small">
             <el-table-column prop="name" label="文件名" min-width="200">
               <template #default="{ row }">
                 <el-link type="primary" @click="viewFile(row)">{{ row.name }}</el-link>
@@ -293,7 +293,7 @@
           <template #header>
             <span>Available Exploits</span>
           </template>
-          <el-table v-if="exploits.length" :data="exploits" size="small" stripe>
+          <el-table v-if="exploits.length" :data="exploits" size="small">
             <el-table-column prop="name" label="Name" width="200" />
             <el-table-column prop="cve" label="CVE" width="150" />
             <el-table-column prop="severity" label="Severity" width="100">
@@ -365,15 +365,15 @@
           <el-select v-model="listenModeType" style="width: 100%;">
             <el-option label="Standard Listen" value="listen">
               <span>Standard Listen</span>
-              <span style="color: #909399; font-size: 12px; margin-left: 8px;">TCP/HTTP/WS bind shell</span>
+              <span style="color: var(--pf-text-muted); font-size: 12px; margin-left: 8px;">TCP/HTTP/WS bind shell</span>
             </el-option>
             <el-option label="DLL Listen" value="dll_listen">
               <span>DLL Listen</span>
-              <span style="color: #909399; font-size: 12px; margin-left: 8px;">DLL-based bind shell</span>
+              <span style="color: var(--pf-text-muted); font-size: 12px; margin-left: 8px;">DLL-based bind shell</span>
             </el-option>
             <el-option label="eBPF Listen" value="ebpf_listen">
               <span>eBPF Listen</span>
-              <span style="color: #909399; font-size: 12px; margin-left: 8px;">Linux eBPF bind shell</span>
+              <span style="color: var(--pf-text-muted); font-size: 12px; margin-left: 8px;">Linux eBPF bind shell</span>
             </el-option>
           </el-select>
           <div class="field-hint">
@@ -425,8 +425,8 @@
       </el-form>
       <template #footer>
         <el-button @click="showDialog = false">Cancel</el-button>
-        <el-button type="danger" @click="submitExploit" :loading="executing">
-          Exploit
+        <el-button :type="selectedMode === 'check' ? 'primary' : 'danger'" @click="submitExploit" :loading="executing">
+          {{ selectedMode === 'check' ? 'Run Check' : 'Exploit' }}
         </el-button>
       </template>
     </el-dialog>
@@ -884,8 +884,11 @@ function normalizeText(value?: string): string {
   return String(value || '').trim().toLowerCase()
 }
 
-function inferExploitKind(vuln: VulnerabilityGroup): 'execute' | 'leak' {
+function inferExploitKind(vuln: VulnerabilityGroup): 'execute' | 'leak' | 'upload' {
   const text = `${vuln.name} ${vuln.hits.map(hit => `${hit.cve || ''} ${hit.detail || ''}`).join(' ')}`.toLowerCase()
+  if (/(upload|file upload|arbitrary upload|unrestricted upload|path traversal.*upload)/.test(text)) {
+    return 'upload'
+  }
   if (/(disclosure|exposure|exposed|leak|leakage|sensitive|secret|credential|token|dump|directory listing|file read|source code|config|env\b)/.test(text)) {
     return 'leak'
   }
@@ -934,6 +937,26 @@ function buildFallbackExploit(vuln: VulnerabilityGroup): ExploitInfo {
           required: true,
           modes: ['execute'],
         }]
+      : exploitKind === 'upload'
+      ? [
+          {
+            key: 'upload_file',
+            label: 'Upload File',
+            type: 'file',
+            placeholder: 'Select file to upload',
+            description: 'Local file to upload to the target server',
+            required: false,
+            modes: ['execute'],
+          },
+          {
+            key: 'remote_path',
+            label: 'Remote Path',
+            placeholder: '/tmp/webshell.php',
+            description: 'Target path on the remote server',
+            required: false,
+            modes: ['execute'],
+          }
+        ]
       : [],
     default_command: 'id',
   }
@@ -943,7 +966,7 @@ function resolveExploitForVulnerability(vuln: VulnerabilityGroup): ExploitInfo {
   return findExploitForVulnerability(vuln) || buildFallbackExploit(vuln)
 }
 
-function openExploitDialog(exploit: ExploitInfo, target: string) {
+function openExploitDialog(exploit: ExploitInfo, target: string, mode: ExploitMode = 'execute') {
   const resolvedTarget = target.trim()
   if (!resolvedTarget) {
     ElMessage.warning('Please enter a target')
@@ -951,12 +974,12 @@ function openExploitDialog(exploit: ExploitInfo, target: string) {
   }
 
   selectedExploit.value = exploit
-  selectedMode.value = 'execute'
+  selectedMode.value = mode
   exploitTarget.value = resolvedTarget
   exploitCommand.value = exploit.default_command || 'id'
   exploitOptionValues.value = {}
 
-  for (const option of filterExploitOptions(exploit, 'execute')) {
+  for (const option of filterExploitOptions(exploit, mode)) {
     exploitOptionValues.value[option.key] = ''
   }
 
@@ -1223,6 +1246,12 @@ async function checkExploit(exploit: ExploitInfo) {
     return
   }
 
+  const checkOptions = filterExploitOptions(exploit, 'check')
+  if (checkOptions.length > 0) {
+    openExploitDialog(exploit, currentTarget.value.url, 'check')
+    return
+  }
+
   try {
     const result = await triggerExploit({
       target: currentTarget.value.url,
@@ -1408,7 +1437,7 @@ async function submitExploit() {
     const result = await triggerExploit({
       target: exploitTarget.value.trim(),
       exploit_id: selectedExploit.value.id,
-      mode: 'execute',
+      mode: selectedMode.value,
       command: showCommandInput.value ? (exploitCommand.value.trim() || selectedExploit.value.default_command || 'id') : undefined,
       options: Object.keys(options).length > 0 ? options : undefined,
       leak_path: options.leak_path || undefined,
@@ -1416,9 +1445,9 @@ async function submitExploit() {
       target_id: targetId.value,
     })
     exploitResult.value = result
-    exploitResultMode.value = 'execute'
+    exploitResultMode.value = selectedMode.value
     showDialog.value = false
-    ElMessage.success('Exploit executed')
+    ElMessage.success(selectedMode.value === 'check' ? 'Check completed' : 'Exploit executed')
 
     // If listen mode and exploit succeeded, automatically connect to the bind shell
     if (vshellConnectionMode.value === 'listen' && useVShellShellcode.value && result?.status === 'success') {
@@ -1499,7 +1528,7 @@ onMounted(async () => {
 }
 
 .header-left h1 {
-  color: #e5e5e5;
+  color: var(--pf-text-primary);
   margin: 0;
 }
 
@@ -1523,33 +1552,33 @@ onMounted(async () => {
 
 .stat-card {
   padding: 20px;
-  background: #1a1a1a;
-  border: 1px solid #303030;
-  border-radius: 8px;
+  background: var(--pf-bg-elevated);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
   text-align: center;
   transition: all 0.3s;
 }
 
 .stat-card:hover {
-  border-color: #409eff;
+  border-color: var(--pf-accent);
   transform: translateY(-2px);
 }
 
 .stat-number {
   font-size: 36px;
   font-weight: bold;
-  color: #409eff;
+  color: var(--pf-text-primary);
   text-align: center;
   margin-bottom: 8px;
 }
 
 .stat-number.has-vulns {
-  color: #f56c6c;
+  color: #c88888;
 }
 
 .stat-label {
   font-size: 13px;
-  color: #909399;
+  color: var(--pf-text-muted);
   text-align: center;
 }
 
@@ -1561,7 +1590,7 @@ onMounted(async () => {
 }
 
 .host-domain {
-  color: #909399;
+  color: var(--pf-text-muted);
   font-size: 13px;
 }
 
@@ -1574,7 +1603,7 @@ onMounted(async () => {
 
 .badge-label {
   font-size: 12px;
-  color: #909399;
+  color: var(--pf-text-muted);
   margin-right: 12px;
 }
 
@@ -1590,7 +1619,7 @@ onMounted(async () => {
 
 .vuln-group-expand-title {
   margin-bottom: 8px;
-  color: #c0c4cc;
+  color: var(--pf-text-secondary);
   font-size: 12px;
 }
 
@@ -1608,7 +1637,7 @@ onMounted(async () => {
 }
 
 .vuln-hit-target {
-  color: #909399;
+  color: var(--pf-text-muted);
   font-size: 12px;
   word-break: break-all;
 }
@@ -1616,7 +1645,7 @@ onMounted(async () => {
 .empty-hint {
   text-align: center;
   padding: 40px;
-  color: #909399;
+  color: var(--pf-text-muted);
 }
 
 .result-card {
@@ -1628,7 +1657,7 @@ onMounted(async () => {
 }
 
 .result-section-title {
-  color: #c0c4cc;
+  color: var(--pf-text-secondary);
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 8px;
@@ -1636,16 +1665,16 @@ onMounted(async () => {
 
 .option-hint {
   margin-top: 6px;
-  color: #909399;
+  color: var(--pf-text-muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .result-output {
-  background: #0d0d0d;
-  color: #67c23a;
+  background: var(--pf-bg-terminal);
+  color: var(--pf-success);
   padding: 16px;
-  border-radius: 4px;
+  border-radius: var(--pf-radius);
   font-family: monospace;
   font-size: 13px;
   max-height: 400px;
@@ -1664,8 +1693,8 @@ onMounted(async () => {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: 'Courier New', monospace;
-  background: #0d0d0d;
-  color: #67c23a;
+  background: var(--pf-bg-terminal);
+  color: var(--pf-success);
   padding: 16px;
   border-radius: 4px;
   font-size: 13px;
@@ -1673,7 +1702,7 @@ onMounted(async () => {
 
 .field-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--pf-text-muted);
   margin-top: 4px;
 }
 </style>

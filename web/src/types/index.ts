@@ -167,6 +167,8 @@ export interface ExploitRequest {
   mode?: 'check' | 'execute'
   command?: string
   leak_path?: string
+  upload_file?: string
+  remote_path?: string
   options?: Record<string, string>
 }
 

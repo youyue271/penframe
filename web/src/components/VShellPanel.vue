@@ -47,17 +47,72 @@ const vshell = useVShellStore()
   justify-content: center;
   height: 100%;
   gap: 16px;
+  background: var(--pf-bg-base);
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .vshell-iframe {
   width: 100%;
   height: 100%;
   border: none;
-  background: #000;
+  background: var(--pf-bg-terminal);
 }
 
 .el-icon.is-loading {
   font-size: 32px;
-  color: #409eff;
+  color: var(--pf-accent-cyan);
+  filter: drop-shadow(0 0 8px var(--pf-accent-cyan));
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+:deep(.el-drawer) {
+  background: var(--pf-bg-elevated);
+  border-left: 1px solid var(--pf-border);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.6);
+}
+
+:deep(.el-drawer__header) {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.1), rgba(168, 85, 247, 0.1));
+  border-bottom: 1px solid var(--pf-border);
+  padding: 20px 24px;
+  margin-bottom: 0;
+}
+
+:deep(.el-drawer__title) {
+  font-family: 'Orbitron', 'JetBrains Mono', monospace;
+  color: var(--pf-accent-cyan);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(0, 217, 255, 0.5);
+}
+
+:deep(.el-drawer__body) {
+  padding: 0;
+  background: var(--pf-bg-terminal);
+}
+
+:deep(.el-empty__description) {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--pf-text-secondary);
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+:deep(.el-text) {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
 }
 </style>
